@@ -1,0 +1,427 @@
+// Mambe Fundraiser Manager data model. Source of truth: docs/SPEC.md, "Data model".
+//
+// Rules that apply to every table:
+// - Money is integer cents (columns end in "_cents").
+// - Every timestamp is UTC (timestamptz). Calendar dates (start/end date) are plain dates.
+// - Shopify IDs are stored as their numeric ID in a string ("5551234567890").
+//
+// Constraints Prisma can't express live in raw SQL in the migration:
+// - fundraisers_no_overlap (btree_gist exclusion constraint)
+// - audit_log is append-only (trigger refuses UPDATE and DELETE)
+// - organizers.email must be lowercase (check constraint)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Shopify's admin session storage (from the app template).
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Organization {
+  id            Int      @id @default(autoincrement())
+  name          String
+  type          String // school | club | booster | other
+  city          String?
+  state         String?
+  website       String?
+  notes         String?
+  driveFolderId String?  @map("drive_folder_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  teams Team[]
+
+  @@map("organizations")
+}
+
+model Team {
+  id             Int      @id @default(autoincrement())
+  organizationId Int      @map("organization_id")
+  name           String // "Girls Lacrosse"
+  sport          String?
+  level          String?
+  driveFolderId  String?  @map("drive_folder_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  products     Product[]
+  fundraisers  Fundraiser[]
+
+  @@index([organizationId])
+  @@map("teams")
+}
+
+model Organizer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique // always lowercase (check constraint in migration)
+  phone     String?
+  role      String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  fundraisers   FundraiserOrganizer[]
+  loginTokens   PortalLoginToken[]
+  portalSessions PortalSession[]
+
+  @@map("organizers")
+}
+
+model FundraiserOrganizer {
+  fundraiserId Int     @map("fundraiser_id")
+  organizerId  Int     @map("organizer_id")
+  isPrimary    Boolean @default(false) @map("is_primary")
+
+  fundraiser Fundraiser @relation(fields: [fundraiserId], references: [id])
+  organizer  Organizer  @relation(fields: [organizerId], references: [id])
+
+  @@id([fundraiserId, organizerId])
+  @@index([organizerId])
+  @@map("fundraiser_organizers")
+}
+
+model Product {
+  id               Int       @id @default(autoincrement())
+  shopifyProductId String    @unique @map("shopify_product_id")
+  handle           String
+  title            String
+  status           String // ACTIVE | DRAFT | ARCHIVED | DELETED
+  tags             String[]  @default([])
+  teamId           Int?      @map("team_id")
+  designNotes      String?   @map("design_notes")
+  driveFolderId    String?   @map("drive_folder_id")
+  lastSyncedAt     DateTime? @map("last_synced_at") @db.Timestamptz(3)
+  backfilledAt     DateTime? @map("backfilled_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  team        Team?        @relation(fields: [teamId], references: [id])
+  fundraisers Fundraiser[]
+
+  @@index([teamId])
+  @@map("products")
+}
+
+model Fundraiser {
+  id         Int      @id @default(autoincrement())
+  publicCode String   @unique @map("public_code") // e.g. CHS-GLAX-F26
+  teamId     Int      @map("team_id")
+  productId  Int      @map("product_id")
+  seasonLabel String? @map("season_label")
+
+  // Calendar dates in the fundraiser's timezone. The window below is computed
+  // from these by app/lib/window.ts and nothing else.
+  startDate DateTime @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date
+  timezone  String   @default("America/Los_Angeles")
+  // Half-open [window_start, window_end) in UTC.
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd   DateTime @map("window_end") @db.Timestamptz(3)
+
+  payoutRateCents Int    @default(2500) @map("payout_rate_cents") // copied in at creation
+  status          String @default("setup") // allowed transitions live in code
+
+  // Setup checklist: each item records when and by whom.
+  organizerInfoReceivedAt  DateTime? @map("organizer_info_received_at") @db.Timestamptz(3)
+  organizerInfoReceivedBy  String?   @map("organizer_info_received_by")
+  artworkApprovedAt        DateTime? @map("artwork_approved_at") @db.Timestamptz(3)
+  artworkApprovedBy        String?   @map("artwork_approved_by")
+  productReadyAt           DateTime? @map("product_ready_at") @db.Timestamptz(3)
+  productReadyBy           String?   @map("product_ready_by")
+  assetsUploadedAt         DateTime? @map("assets_uploaded_at") @db.Timestamptz(3)
+  assetsUploadedBy         String?   @map("assets_uploaded_by")
+  driveFoldersCreatedAt    DateTime? @map("drive_folders_created_at") @db.Timestamptz(3)
+  driveFoldersCreatedBy    String?   @map("drive_folders_created_by")
+  launchPackageReviewedAt  DateTime? @map("launch_package_reviewed_at") @db.Timestamptz(3)
+  launchPackageReviewedBy  String?   @map("launch_package_reviewed_by")
+  waitingOnOrganizerSince  DateTime? @map("waiting_on_organizer_since") @db.Timestamptz(3)
+
+  shortUrl         String?   @map("short_url")
+  paypalPayeeEmail String?   @map("paypal_payee_email") // the organization's account
+  driveFolderId    String?   @map("drive_folder_id")
+  cancelledAt      DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason     String?   @map("cancel_reason")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  team           Team                  @relation(fields: [teamId], references: [id])
+  product        Product               @relation(fields: [productId], references: [id])
+  organizers     FundraiserOrganizer[]
+  lineItems      OrderLineItem[]
+  payout         Payout?
+  assets         Asset[]
+  communications Communication[]
+  applications   Application[]
+
+  @@index([status])
+  @@index([productId])
+  @@map("fundraisers")
+}
+
+model Application {
+  id                    Int      @id @default(autoincrement())
+  rawSubmission         Json     @map("raw_submission") // kept forever
+  name                  String?
+  email                 String?
+  phone                 String?
+  organizationName      String?  @map("organization_name")
+  teamName              String?  @map("team_name")
+  role                  String?
+  city                  String?
+  state                 String?
+  roughTiming           String?  @map("rough_timing")
+  hasLogo               Boolean? @map("has_logo")
+  status                String   @default("new") // new | converted | declined | spam
+  convertedFundraiserId Int?     @map("converted_fundraiser_id")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  convertedFundraiser Fundraiser? @relation(fields: [convertedFundraiserId], references: [id])
+
+  @@index([status])
+  @@map("applications")
+}
+
+// Minimal copy of a Shopify order. No customer names, emails or addresses.
+model ShopifyOrder {
+  id                 Int       @id @default(autoincrement())
+  shopifyOrderId     String    @unique @map("shopify_order_id")
+  name               String // "#1234"
+  processedAt        DateTime  @map("processed_at") @db.Timestamptz(3)
+  financialStatus    String    @map("financial_status") // Shopify displayFinancialStatus, e.g. PAID
+  cancelledAt        DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  sourceName         String?   @map("source_name") // raw Shopify value
+  source             String // web | pos | draft | other
+  discountCodes      String[]  @default([]) @map("discount_codes")
+  hasMoneyOnlyRefund Boolean   @default(false) @map("has_money_only_refund")
+  isTest             Boolean   @default(false) @map("is_test")
+  shopifyUpdatedAt   DateTime  @map("shopify_updated_at") @db.Timestamptz(3)
+  lastSyncedAt       DateTime  @map("last_synced_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  lineItems OrderLineItem[]
+
+  @@index([processedAt])
+  @@map("shopify_orders")
+}
+
+model OrderLineItem {
+  id                Int     @id @default(autoincrement())
+  shopifyLineItemId String  @unique @map("shopify_line_item_id") // main guard against double counting
+  orderId           Int     @map("order_id")
+  shopifyProductId  String  @map("shopify_product_id") // kept even if the product is deleted
+  shopifyVariantId  String? @map("shopify_variant_id")
+  quantity          Int
+  refundedQuantity  Int     @default(0) @map("refunded_quantity")
+  currentQuantity   Int     @map("current_quantity") // Shopify's quantity after removals
+  unitPriceCents    Int     @map("unit_price_cents")
+  discountCents     Int     @default(0) @map("discount_cents")
+  // Recorded on first save and never overwritten.
+  unitCostCents     Int?    @map("unit_cost_cents")
+  costApproximate   Boolean @default(false) @map("cost_approximate")
+
+  // Written only by the attribution engine (app/lib/attribution.ts).
+  attributedFundraiserId Int?      @map("attributed_fundraiser_id")
+  qualifyingUnits        Int       @default(0) @map("qualifying_units")
+  outcome                String    @default("pending") // qualifying | non_fundraiser | refunded_cancelled | excluded | not_eligible
+  reviewFlags            String[]  @default([]) @map("review_flags")
+  reviewReason           String?   @map("review_reason")
+  attributedAt           DateTime? @map("attributed_at") @db.Timestamptz(3)
+
+  adminDecision     String?   @map("admin_decision") // include | exclude
+  adminDecisionNote String?   @map("admin_decision_note")
+  adminDecisionBy   String?   @map("admin_decision_by")
+  adminDecisionAt   DateTime? @map("admin_decision_at") @db.Timestamptz(3)
+  locked            Boolean   @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order                ShopifyOrder @relation(fields: [orderId], references: [id])
+  attributedFundraiser Fundraiser?  @relation(fields: [attributedFundraiserId], references: [id])
+  payoutLine           PayoutLine?
+
+  @@index([shopifyProductId])
+  @@index([attributedFundraiserId])
+  @@index([orderId])
+  @@map("order_line_items")
+}
+
+model Payout {
+  id              Int       @id @default(autoincrement())
+  fundraiserId    Int       @unique @map("fundraiser_id") // one per fundraiser
+  rateCents       Int       @map("rate_cents")
+  qualifyingUnits Int       @map("qualifying_units")
+  amountCents     Int       @map("amount_cents")
+  status          String    @default("draft") // draft | approved | paid
+  calculatedAt    DateTime? @map("calculated_at") @db.Timestamptz(3)
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(3)
+  approvedBy      String?   @map("approved_by")
+  paidAt          DateTime? @map("paid_at") @db.Timestamptz(3)
+  method          String?
+  paypalReference String?   @map("paypal_reference")
+  payeeEmail      String?   @map("payee_email")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  fundraiser  Fundraiser         @relation(fields: [fundraiserId], references: [id])
+  lines       PayoutLine[]
+  adjustments PayoutAdjustment[]
+
+  @@map("payouts")
+}
+
+// The frozen record of exactly what was paid.
+model PayoutLine {
+  id           Int @id @default(autoincrement())
+  payoutId     Int @map("payout_id")
+  lineItemId   Int @unique @map("line_item_id")
+  unitsCounted Int @map("units_counted")
+
+  payout   Payout        @relation(fields: [payoutId], references: [id])
+  lineItem OrderLineItem @relation(fields: [lineItemId], references: [id])
+
+  @@index([payoutId])
+  @@map("payout_lines")
+}
+
+model PayoutAdjustment {
+  id            Int      @id @default(autoincrement())
+  payoutId      Int      @map("payout_id")
+  amountCents   Int      @map("amount_cents") // + or -
+  reason        String
+  effectiveDate DateTime @map("effective_date") @db.Date
+  adminNote     String   @map("admin_note")
+  createdBy     String   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  payout Payout @relation(fields: [payoutId], references: [id])
+
+  @@index([payoutId])
+  @@map("payout_adjustments")
+}
+
+model Asset {
+  id           Int      @id @default(autoincrement())
+  fundraiserId Int      @map("fundraiser_id")
+  kind         String // flyer | email_copy | social_image | other
+  title        String
+  url          String?
+  driveFileId  String?  @map("drive_file_id")
+  visibility   String   @default("internal") // internal | organizer
+  isCurrent    Boolean  @default(true) @map("is_current")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  fundraiser Fundraiser @relation(fields: [fundraiserId], references: [id])
+
+  @@index([fundraiserId])
+  @@map("assets")
+}
+
+model Communication {
+  id           Int       @id @default(autoincrement())
+  fundraiserId Int       @map("fundraiser_id")
+  kind         String // confirmation | launch | week_2 | week_3 | final | ended | paid
+  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz(3)
+  sentAt       DateTime? @map("sent_at") @db.Timestamptz(3)
+  status       String    @default("scheduled") // scheduled | sent | failed | skipped
+  attempts     Int       @default(0)
+  error        String?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  fundraiser Fundraiser @relation(fields: [fundraiserId], references: [id])
+
+  @@index([fundraiserId])
+  @@index([status, scheduledFor])
+  @@map("communications")
+}
+
+// Append-only: a trigger in the migration refuses UPDATE and DELETE.
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  entity    String
+  entityId  String   @map("entity_id")
+  action    String
+  before    Json?
+  after     Json?
+  actor     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
+
+// One row per Shopify webhook delivery. No payload is stored (order payloads
+// carry customer details); the order is re-read from the API instead.
+model WebhookEvent {
+  id          Int       @id @default(autoincrement())
+  webhookId   String    @unique @map("webhook_id")
+  topic       String
+  shop        String
+  resourceId  String?   @map("resource_id") // Shopify order or product ID
+  status      String    @default("received") // received | processed | failed | ignored
+  attempts    Int       @default(0)
+  error       String?
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+model PortalLoginToken {
+  id          Int       @id @default(autoincrement())
+  organizerId Int       @map("organizer_id")
+  tokenHash   String    @unique @map("token_hash") // only the hash is stored
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt      DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organizer Organizer @relation(fields: [organizerId], references: [id])
+
+  @@index([organizerId])
+  @@map("portal_login_tokens")
+}
+
+model PortalSession {
+  id          Int       @id @default(autoincrement())
+  organizerId Int       @map("organizer_id")
+  sessionHash String    @unique @map("session_hash") // only the hash is stored
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organizer Organizer @relation(fields: [organizerId], references: [id])
+
+  @@index([organizerId])
+  @@map("portal_sessions")
+}
