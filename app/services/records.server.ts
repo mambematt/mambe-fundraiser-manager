@@ -2,9 +2,11 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { writeAudit } from "./audit.server";
-import { UserError } from "./fundraisers.server";
+import { UserError } from "../lib/errors";
 
-export const ORGANIZATION_TYPES = ["school", "club", "booster", "other"] as const;
+import { ORGANIZATION_TYPES } from "../lib/organizations";
+
+export { ORGANIZATION_TYPES };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

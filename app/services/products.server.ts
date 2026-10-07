@@ -6,6 +6,7 @@ import { productLifetimeTotals, type ProductLifetimeTotals } from "../lib/attrib
 import { numericId } from "../lib/shopify-ids";
 import type { ShopifyClient } from "./shopify-api.server";
 import { syncOrderFromShopify } from "./order-sync.server";
+import { UserError } from "../lib/errors";
 import { writeAudit } from "./audit.server";
 import { alert } from "./alerts.server";
 
@@ -23,7 +24,11 @@ export function parseProductReference(input: string): string {
   const text = input.trim();
   const fromUrl = /\/products\/(\d+)/.exec(text);
   if (fromUrl) return fromUrl[1];
-  return numericId(text);
+  try {
+    return numericId(text);
+  } catch {
+    throw new UserError(`"${text}" isn't a Shopify product ID or product link.`);
+  }
 }
 
 export interface LinkResult {
@@ -44,7 +49,7 @@ export async function updateProductDetails(
   const product = await db.product.findUniqueOrThrow({ where: { id } });
   if (product.teamId && input.teamId !== product.teamId) {
     const used = await db.fundraiser.count({ where: { productId: id } });
-    if (used) throw new Error("This product already has fundraisers for its team, so its team can't change.");
+    if (used) throw new UserError("This product already has fundraisers for its team, so its team can't change.");
   }
   const after = { teamId: input.teamId, designNotes: input.designNotes?.trim() || null };
   await db.product.update({ where: { id }, data: after });
@@ -66,10 +71,10 @@ export async function linkProduct(
 ): Promise<LinkResult> {
   const shopifyProductId = parseProductReference(reference);
   const info = await shopify.fetchProduct(shopifyProductId);
-  if (!info) throw new Error(`No Shopify product with ID ${shopifyProductId}`);
+  if (!info) throw new UserError(`No Shopify product with ID ${shopifyProductId}`);
 
   if (info.status !== "ACTIVE") {
-    throw new Error(`"${info.title}" is ${info.status.toLowerCase()} in Shopify. Only active products can be linked.`);
+    throw new UserError(`"${info.title}" is ${info.status.toLowerCase()} in Shopify. Only active products can be linked.`);
   }
   const warnings: string[] = [];
   if (!hasFundraiserTag(info.tags)) {

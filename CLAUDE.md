@@ -21,8 +21,11 @@ locally (git-ignored) and in Render environment variables.
 - `app/lib/` – pure logic (attribution, window, money, Shopify order mapping)
 - `app/services/` – database and Shopify work (`*.server.ts`)
 - `app/routes/webhooks.shopify.tsx` – all order/product webhooks
+- `app/routes/jobs.clock.tsx` – called by the Render cron every 15 min (status clock; nightly re-check at 3 AM Pacific)
+- `app/lib/status.ts` – the one list of statuses and allowed transitions
+- `app/services/fundraisers.server.ts` – the only code that changes a fundraiser status, dates or rate
 - `prisma/migrations/*_init/migration.sql` – ends with hand-written SQL: overlap exclusion constraint, append-only audit log
-- `tests/attribution/spec-cases.test.ts` and `tests/db/spec-cases.db.test.ts` – the spec's 24 cases, numbered to match
+- `tests/attribution/spec-cases.test.ts`, `tests/db/spec-cases.db.test.ts`, `tests/db/lifecycle.db.test.ts` – the spec's 24 cases, numbered to match
 
 ## Commands
 - `npm test` – all tests; starts a throwaway Postgres automatically

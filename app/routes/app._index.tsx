@@ -1,59 +1,22 @@
-// Session 1 admin home: link products, run backfills, and watch orders and
-// webhooks arrive. The full work queue replaces this in a later session.
+// Admin home (until session 3's work queue): recent order lines, sync health
+// and scheduled jobs.
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { DateTime } from "luxon";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { ResultBanner } from "../components/ResultBanner";
 import { REVIEW_FLAG_LABELS, type ReviewFlag } from "../lib/attribution";
+import { pacific } from "../lib/format";
 import { formatCents } from "../lib/money";
-import { DEFAULT_TIMEZONE } from "../lib/window";
-import {
-  backfillProduct,
-  hasFundraiserTag,
-  lifetimeTotalsForProduct,
-  linkProduct,
-} from "../services/products.server";
+import { attempt } from "../services/actions.server";
+import { runNightlyRecheck } from "../services/jobs.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 
-interface BackfillAuditResult {
-  ordersFound?: number;
-  failures?: unknown[];
-}
-
-function pacific(date: Date | string | null): string {
-  if (!date) return "—";
-  return DateTime.fromJSDate(new Date(date))
-    .setZone(DEFAULT_TIMEZONE)
-    .toFormat("LLL d, yyyy h:mm a ZZZZ");
-}
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  await authenticate.admin(request);
 
-  const products = await db.product.findMany({ orderBy: { createdAt: "asc" } });
-  const productRows = await Promise.all(
-    products.map(async (p) => {
-      const lastBackfill = await db.auditLog.findFirst({
-        where: { entity: "product", entityId: String(p.id), action: { startsWith: "backfill" } },
-        orderBy: { id: "desc" },
-      });
-      return {
-        id: p.id,
-        shopifyProductId: p.shopifyProductId,
-        title: p.title,
-        status: p.status,
-        tagged: hasFundraiserTag(p.tags),
-        backfilledAt: p.backfilledAt?.toISOString() ?? null,
-        lastBackfill: lastBackfill
-          ? { action: lastBackfill.action, at: lastBackfill.createdAt.toISOString(), result: lastBackfill.after as BackfillAuditResult | null }
-          : null,
-        totals: await lifetimeTotalsForProduct(db, p.shopifyProductId),
-      };
-    }),
-  );
-
+  const products = await db.product.findMany({ select: { shopifyProductId: true, title: true } });
   const titles = new Map(products.map((p) => [p.shopifyProductId, p.title]));
   const lines = await db.orderLineItem.findMany({
     orderBy: { id: "desc" },
@@ -61,15 +24,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     include: { order: true, attributedFundraiser: { select: { publicCode: true } } },
   });
 
-  const [lastWebhook, failedWebhooks, recentEvents] = await Promise.all([
+  const [lastWebhook, failedWebhooks, recentEvents, lastClock, lastNightly, lastNightlyOk] = await Promise.all([
     db.webhookEvent.findFirst({ orderBy: { receivedAt: "desc" } }),
     db.webhookEvent.count({ where: { status: "failed" } }),
     db.webhookEvent.findMany({ orderBy: { receivedAt: "desc" }, take: 10 }),
+    db.jobRun.findFirst({ where: { name: "clock" }, orderBy: { startedAt: "desc" } }),
+    db.jobRun.findFirst({ where: { name: "nightly" }, orderBy: { startedAt: "desc" } }),
+    db.jobRun.findFirst({ where: { name: "nightly", status: "succeeded" }, orderBy: { startedAt: "desc" } }),
   ]);
+  const job = (run: typeof lastClock) =>
+    run ? { at: run.startedAt.toISOString(), status: run.status, error: run.error?.split("\n")[0] ?? null, details: run.details ? JSON.stringify(run.details) : "" } : null;
 
   return {
-    shop: session.shop,
-    products: productRows,
     lines: lines.map((l) => ({
       id: l.id,
       orderName: l.order.name,
@@ -87,7 +53,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       qualifyingUnits: l.qualifyingUnits,
       outcome: l.outcome,
       flags: l.reviewFlags,
-      savedAt: l.createdAt.toISOString(),
     })),
     webhooks: {
       lastReceivedAt: lastWebhook?.receivedAt.toISOString() ?? null,
@@ -101,44 +66,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         error: e.error?.split("\n")[0] ?? null,
       })),
     },
+    jobs: { clock: job(lastClock), nightly: job(lastNightly), nightlyOkAt: lastNightlyOk?.startedAt.toISOString() ?? null },
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const form = await request.formData();
-  const intent = form.get("intent");
-  const shopify = await shopifyClientForShop(session.shop);
-
-  if (intent === "link") {
-    try {
-      const result = await linkProduct(db, shopify, String(form.get("reference") ?? ""), "admin");
-      return {
-        ok: true,
-        message: result.alreadyLinked
-          ? `"${result.title}" was already linked; details refreshed.`
-          : `Linked "${result.title}". Run its backfill next.`,
-        warnings: result.warnings,
-      };
-    } catch (error) {
-      return { ok: false, message: String((error as Error).message ?? error), warnings: [] };
-    }
-  }
-
-  if (intent === "backfill") {
-    const shopifyProductId = String(form.get("shopifyProductId"));
-    // A backfill can take minutes, so it runs after this request returns.
-    void backfillProduct(db, shopify, shopifyProductId, "admin").catch((error) =>
-      console.error(`Backfill of product ${shopifyProductId} failed`, error),
-    );
-    return {
-      ok: true,
-      message: "Backfill started. Refresh this page in a minute or two to see the totals.",
-      warnings: [],
-    };
-  }
-
-  return { ok: false, message: "Unknown action", warnings: [] };
+  return attempt(async () => {
+    const shopify = await shopifyClientForShop(session.shop);
+    const result = await runNightlyRecheck(db, shopify);
+    if (result.status === "failed") return { ok: false, message: `Nightly re-check failed: ${result.error}` };
+    const d = result.details as { ordersChecked: number; ordersSaved: number };
+    return { ok: true, message: `Nightly re-check done: ${d.ordersChecked} orders checked, ${d.ordersSaved} with linked products saved.` };
+  });
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -159,106 +99,11 @@ const OUTCOME_LABELS: Record<string, string> = {
 export default function Index() {
   const data = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
-  const navigation = useNavigation();
-  const busy = navigation.state !== "idle";
+  const busy = useNavigation().state !== "idle";
 
   return (
-    <s-page heading="Fundraisers">
-      {result && (
-        <s-banner tone={result.ok ? (result.warnings.length ? "warning" : "success") : "critical"}>
-          <s-paragraph>{result.message}</s-paragraph>
-          {result.warnings.map((w) => (
-            <s-paragraph key={w}>{w}</s-paragraph>
-          ))}
-        </s-banner>
-      )}
-
-      <s-section heading="Linked products">
-        {data.products.length === 0 ? (
-          <s-paragraph>No products linked yet. Link one below.</s-paragraph>
-        ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Product</s-table-header>
-              <s-table-header>Tag</s-table-header>
-              <s-table-header format="numeric">Ordered</s-table-header>
-              <s-table-header format="numeric">Refunded / cancelled</s-table-header>
-              <s-table-header format="numeric">Net units</s-table-header>
-              <s-table-header format="numeric">In window</s-table-header>
-              <s-table-header format="numeric">Outside window</s-table-header>
-              <s-table-header>Backfill</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {data.products.map((p) => (
-                <s-table-row key={p.id}>
-                  <s-table-cell>
-                    <s-stack gap="small-200">
-                      <s-text>{p.title}</s-text>
-                      <s-text color="subdued">
-                        ID {p.shopifyProductId} · {p.status.toLowerCase()}
-                      </s-text>
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    {p.tagged ? (
-                      <s-badge tone="success">fundraiser</s-badge>
-                    ) : (
-                      <s-badge tone="warning">Missing tag</s-badge>
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>{p.totals.orderedUnits}</s-table-cell>
-                  <s-table-cell>{p.totals.refundedOrCancelledUnits}</s-table-cell>
-                  <s-table-cell>{p.totals.netUnits}</s-table-cell>
-                  <s-table-cell>{p.totals.inWindowUnits}</s-table-cell>
-                  <s-table-cell>{p.totals.outsideWindowUnits}</s-table-cell>
-                  <s-table-cell>
-                    <s-stack gap="small-200">
-                      <s-text color="subdued">
-                        {p.lastBackfill
-                          ? `${p.lastBackfill.action === "backfill" ? "Done" : "Incomplete"} ${pacific(p.lastBackfill.at)} · ${p.lastBackfill.result?.ordersFound ?? 0} orders` +
-                            (p.lastBackfill.result?.failures?.length
-                              ? ` · ${p.lastBackfill.result.failures.length} failed`
-                              : "")
-                          : "Not run"}
-                      </s-text>
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="backfill" />
-                        <input type="hidden" name="shopifyProductId" value={p.shopifyProductId} />
-                        <s-button type="submit" disabled={busy}>
-                          Run backfill
-                        </s-button>
-                      </Form>
-                    </s-stack>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        )}
-        <s-paragraph>
-          <s-text color="subdued">
-            Compare &ldquo;Net units&rdquo; with Shopify Analytics → Reports → Sales by product,
-            &ldquo;Net items sold&rdquo;, for all time. Test orders are left out of these totals.
-          </s-text>
-        </s-paragraph>
-      </s-section>
-
-      <s-section heading="Link a product">
-        <Form method="post">
-          <input type="hidden" name="intent" value="link" />
-          <s-stack gap="base">
-            <s-text-field
-              name="reference"
-              label="Shopify product ID or product admin URL"
-              placeholder="https://admin.shopify.com/store/…/products/1234567890"
-              required
-            />
-            <s-button type="submit" variant="primary" disabled={busy}>
-              Link product
-            </s-button>
-          </s-stack>
-        </Form>
-      </s-section>
+    <s-page heading="Home">
+      <ResultBanner result={result} />
 
       <s-section heading="Recent order lines">
         {data.lines.length === 0 ? (
@@ -317,6 +162,19 @@ export default function Index() {
           Last webhook: {pacific(data.webhooks.lastReceivedAt)} · Failed webhooks:{" "}
           {data.webhooks.failed}
         </s-paragraph>
+        <s-paragraph>
+          Status clock (every 15 min): {data.jobs.clock ? `${data.jobs.clock.status} ${pacific(data.jobs.clock.at)}` : "not run yet"}
+          {data.jobs.clock?.error ? ` · ${data.jobs.clock.error}` : ""}
+        </s-paragraph>
+        <s-paragraph>
+          Nightly re-check: last success {pacific(data.jobs.nightlyOkAt)}
+          {data.jobs.nightly && data.jobs.nightly.status !== "succeeded"
+            ? ` · last attempt ${data.jobs.nightly.status} ${pacific(data.jobs.nightly.at)}${data.jobs.nightly.error ? `: ${data.jobs.nightly.error}` : ""}`
+            : ""}
+        </s-paragraph>
+        <Form method="post">
+          <s-button type="submit" disabled={busy}>Run nightly re-check now</s-button>
+        </Form>
         {data.webhooks.recent.length > 0 && (
           <s-table>
             <s-table-header-row>

@@ -6,9 +6,12 @@
 # Each has its own web service, Postgres database and cron job. Both deploy
 # only after the GitHub "Tests" check passes.
 #
+# The cron job runs every 15 minutes and calls the web service's /jobs/clock
+# endpoint with a shared secret. That runs the status clock every time, and
+# the nightly re-check during the 3 AM Pacific hour.
+#
 # Plan names: Render now names plans by size. "0.5c-512mb" is the former
 # Starter web plan; "0.1c-256mb" is the former Basic-256mb Postgres plan.
-# Confirm the prices on the Blueprint preview screen before applying.
 
 services:
   # ---------------------------------------------------------------- staging
@@ -34,10 +37,16 @@ services:
           property: connectionString
       - key: SCOPES
         value: read_orders,read_all_orders,read_products,read_inventory,write_products,write_online_store_navigation
-      # From the staging app in the Shopify Partner Dashboard (Client ID / Client secret).
+      # From the staging app in the Shopify Dev Dashboard (Client ID / Client secret).
       - key: SHOPIFY_API_KEY
         sync: false
       - key: SHOPIFY_API_SECRET
+        sync: false
+      # Shared with the cron job, which sends it to /jobs/clock.
+      - key: CRON_SECRET
+        generateValue: true
+      # Sentry project key (DSN). Failures are emailed by Sentry.
+      - key: SENTRY_DSN
         sync: false
 
   - type: cron
@@ -46,14 +55,18 @@ services:
     plan: 0.5c-512mb
     region: oregon
     branch: main
-    schedule: "0 10 * * *" # 3:00 AM Pacific (PDT); stub for now
-    buildCommand: echo "stub, nothing to build"
-    startCommand: node scripts/cron-stub.mjs
+    schedule: "*/15 * * * *"
+    buildCommand: echo "nothing to build"
+    startCommand: >-
+      curl -fsS -m 900 -X POST
+      -H "Authorization: Bearer $CRON_SECRET"
+      https://mambe-fundraisers-staging.onrender.com/jobs/clock
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: mambe-fundraisers-staging-db
-          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: mambe-fundraisers-staging
+          envVarKey: CRON_SECRET
 
   # ------------------------------------------------------------- production
   - type: web
@@ -78,10 +91,14 @@ services:
           property: connectionString
       - key: SCOPES
         value: read_orders,read_all_orders,read_products,read_inventory,write_products,write_online_store_navigation
-      # From the production app in the Shopify Partner Dashboard.
+      # From the production app in the Shopify Dev Dashboard.
       - key: SHOPIFY_API_KEY
         sync: false
       - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: SENTRY_DSN
         sync: false
 
   - type: cron
@@ -90,14 +107,18 @@ services:
     plan: 0.5c-512mb
     region: oregon
     branch: production
-    schedule: "0 10 * * *" # 3:00 AM Pacific (PDT); stub for now
-    buildCommand: echo "stub, nothing to build"
-    startCommand: node scripts/cron-stub.mjs
+    schedule: "*/15 * * * *"
+    buildCommand: echo "nothing to build"
+    startCommand: >-
+      curl -fsS -m 900 -X POST
+      -H "Authorization: Bearer $CRON_SECRET"
+      https://mambe-fundraisers.onrender.com/jobs/clock
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: mambe-fundraisers-db
-          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: mambe-fundraisers
+          envVarKey: CRON_SECRET
 
 databases:
   - name: mambe-fundraisers-staging-db

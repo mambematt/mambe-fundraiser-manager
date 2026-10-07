@@ -16,14 +16,14 @@ import {
   type TransitionAction,
 } from "../lib/status";
 import { computeWindow, DEFAULT_TIMEZONE, effectiveWindow, type TimeWindow } from "../lib/window";
+import { UserError } from "../lib/errors";
 import { writeAudit } from "./audit.server";
 import { loadFundraisersForProducts, reattributeProduct, runEngineOnOrder } from "./order-sync.server";
 import { hasFundraiserTag } from "./products.server";
 
 export const DEFAULT_PAYOUT_RATE_CENTS = 2500;
 
-/** A problem to show the admin as-is (not a crash). */
-export class UserError extends Error {}
+export { UserError };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

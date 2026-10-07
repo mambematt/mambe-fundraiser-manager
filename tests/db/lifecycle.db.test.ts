@@ -308,7 +308,7 @@ describe("status clock", () => {
     const s = await seed();
     const late = await newFundraiser(s);
     await db.fundraiser.update({ where: { id: late.id }, data: { status: "scheduled" } });
-    const stillSetup = await newFundraiser(s, "2026-11-01", "2026-11-05", { publicCode: "SETUP-ONLY" });
+    await newFundraiser(s, "2026-11-01", "2026-11-05", { publicCode: "SETUP-ONLY" });
     const cancelled = await newFundraiser(s, "2026-11-10", "2026-11-12", { publicCode: "CANC" });
     await transitionFundraiser(db, cancelled.id, "cancel", { reason: "no", actor: "Matt", now: pt("2026-11-01T00:00:00") });
 
