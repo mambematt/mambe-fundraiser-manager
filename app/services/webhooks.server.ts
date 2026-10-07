@@ -9,6 +9,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import type { ShopifyClient } from "./shopify-api.server";
 import { syncOrderFromShopify } from "./order-sync.server";
 import { markProductDeleted, refreshProduct } from "./products.server";
+import { alert } from "./alerts.server";
 
 export const ORDER_TOPICS = new Set([
   "ORDERS_CREATE",
@@ -123,6 +124,9 @@ export async function processWebhookEvent(
     }
   }
   await db.webhookEvent.update({ where: { id: eventId }, data: { status: "failed" } });
-  console.error(`Webhook event ${eventId} (${event.topic} ${event.resourceId}) failed: ${lastError}`);
+  alert(`Webhook ${event.topic} for ${event.resourceId} failed after ${maxAttempts} attempts`, {
+    eventId,
+    error: lastError.split("\n")[0],
+  });
   return "failed";
 }

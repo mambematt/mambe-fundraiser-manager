@@ -1,11 +1,13 @@
 // Saves Shopify orders and their linked-product lines, then runs attribution.
 // Safe to repeat: everything is an upsert keyed by Shopify ID.
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { OrderLineItem, Prisma, PrismaClient, ShopifyOrder } from "@prisma/client";
 import {
   attributeOrder,
   netUnits,
   type AdminDecision,
+  type AttributedLine,
+  type AttributionFundraiser,
   type AttributionLine,
   type LineAttribution,
   type LineOutcome,
@@ -145,20 +147,32 @@ function storedAttribution(line: {
   };
 }
 
-/** Run the attribution engine over one saved order and store the results. */
-export async function attributeSavedOrder(tx: Tx, orderId: number, now = new Date()) {
-  const order = await tx.shopifyOrder.findUniqueOrThrow({
-    where: { id: orderId },
-    include: { lineItems: { orderBy: { id: "asc" } } },
-  });
-  if (order.lineItems.length === 0) return;
+type OrderWithLines = ShopifyOrder & { lineItems: OrderLineItem[] };
 
-  const productIds = [...new Set(order.lineItems.map((l) => l.shopifyProductId))];
+/** Every non-declined fundraiser on the given products, as the engine needs them. */
+export async function loadFundraisersForProducts(
+  tx: Tx | PrismaClient,
+  shopifyProductIds: string[],
+): Promise<AttributionFundraiser[]> {
   const fundraisers = await tx.fundraiser.findMany({
-    where: { status: { not: "declined" }, product: { shopifyProductId: { in: productIds } } },
+    where: { status: { not: "declined" }, product: { shopifyProductId: { in: shopifyProductIds } } },
     include: { product: { select: { shopifyProductId: true } } },
   });
+  return fundraisers.map((f) => ({
+    id: f.id,
+    shopifyProductId: f.product.shopifyProductId,
+    status: f.status,
+    windowStart: f.windowStart,
+    windowEnd: f.windowEnd,
+    cancelledAt: f.cancelledAt,
+  }));
+}
 
+/**
+ * Feed one saved order to the attribution engine. Used both to store results
+ * and to preview a date/rate change, so the two can never disagree.
+ */
+export function runEngineOnOrder(order: OrderWithLines, fundraisers: AttributionFundraiser[]): AttributedLine[] {
   const inputs: AttributionLine[] = order.lineItems.map((l) => ({
     key: String(l.id),
     shopifyProductId: l.shopifyProductId,
@@ -170,8 +184,7 @@ export async function attributeSavedOrder(tx: Tx, orderId: number, now = new Dat
     locked: l.locked,
     current: storedAttribution(l),
   }));
-
-  const results = attributeOrder(
+  return attributeOrder(
     {
       processedAt: order.processedAt,
       cancelledAt: order.cancelledAt,
@@ -180,15 +193,20 @@ export async function attributeSavedOrder(tx: Tx, orderId: number, now = new Dat
       hasMoneyOnlyRefund: order.hasMoneyOnlyRefund,
     },
     inputs,
-    fundraisers.map((f) => ({
-      id: f.id,
-      shopifyProductId: f.product.shopifyProductId,
-      status: f.status,
-      windowStart: f.windowStart,
-      windowEnd: f.windowEnd,
-      cancelledAt: f.cancelledAt,
-    })),
+    fundraisers,
   );
+}
+
+/** Run the attribution engine over one saved order and store the results. */
+export async function attributeSavedOrder(tx: Tx, orderId: number, now = new Date()) {
+  const order = await tx.shopifyOrder.findUniqueOrThrow({
+    where: { id: orderId },
+    include: { lineItems: { orderBy: { id: "asc" } } },
+  });
+  if (order.lineItems.length === 0) return;
+
+  const productIds = [...new Set(order.lineItems.map((l) => l.shopifyProductId))];
+  const results = runEngineOnOrder(order, await loadFundraisersForProducts(tx, productIds));
 
   for (const result of results) {
     const line = order.lineItems.find((l) => String(l.id) === result.key)!;

@@ -106,6 +106,8 @@ describe("products and backfill", () => {
           ? { shopifyProductId: "4444", handle: "untagged", title: "Untagged Cape", status: "ACTIVE", tags: [] }
           : null,
     listOrderIdsForProduct: async () => Object.keys(orders),
+    listOrderIdsUpdatedSince: async () => Object.keys(orders),
+    searchProducts: async () => [],
   };
 
   test("linking warns when the fundraiser tag is missing", async () => {

@@ -8,6 +8,7 @@ export interface AuditEntry {
   action: string;
   before?: unknown;
   after?: unknown;
+  reason?: string | null;
   actor: string;
 }
 
@@ -25,6 +26,7 @@ export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
       action: entry.action,
       before: toJson(entry.before),
       after: toJson(entry.after),
+      reason: entry.reason ?? null,
       actor: entry.actor,
     },
   });

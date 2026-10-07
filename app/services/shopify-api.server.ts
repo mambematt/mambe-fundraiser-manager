@@ -27,6 +27,21 @@ export interface ShopifyClient {
   fetchProduct(shopifyProductId: string): Promise<ShopifyProductInfo | null>;
   /** Every order ID containing the product, oldest first. */
   listOrderIdsForProduct(shopifyProductId: string): Promise<string[]>;
+  /** Every order ID updated at or after `since`. */
+  listOrderIdsUpdatedSince(since: Date): Promise<string[]>;
+  /** Products whose title matches the words typed. */
+  searchProducts(text: string): Promise<ShopifyProductInfo[]>;
+}
+
+/** "central lacrosse" → title:central* AND title:lacrosse* */
+export function productSearchQuery(text: string): string {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6);
+  return words.map((w) => `title:${w}*`).join(" AND ");
 }
 
 // Only order and line fields the app needs. No customer fields, on purpose.
@@ -82,6 +97,21 @@ export const PRODUCT_QUERY = `#graphql
 export const ORDER_IDS_FOR_PRODUCT_QUERY = `#graphql
   query FundraiserOrderIdsForProduct($query: String!, $after: String) {
     orders(first: 100, after: $after, query: $query, sortKey: PROCESSED_AT) {
+      nodes { id }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+
+export const PRODUCT_SEARCH_QUERY = `#graphql
+  query FundraiserProductSearch($query: String!) {
+    products(first: 25, query: $query, sortKey: TITLE) {
+      nodes { id title handle status tags }
+    }
+  }`;
+
+export const ORDER_IDS_UPDATED_SINCE_QUERY = `#graphql
+  query FundraiserOrdersUpdatedSince($query: String!, $after: String) {
+    orders(first: 100, after: $after, query: $query, sortKey: UPDATED_AT) {
       nodes { id }
       pageInfo { hasNextPage endCursor }
     }
@@ -154,6 +184,33 @@ export function createShopifyClient(run: GraphqlRunner): ShopifyClient {
         after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
       } while (after);
       return ids;
+    },
+
+    async listOrderIdsUpdatedSince(since) {
+      const ids: string[] = [];
+      let after: string | null = null;
+      do {
+        const data = await run(ORDER_IDS_UPDATED_SINCE_QUERY, {
+          query: `updated_at:>='${since.toISOString()}'`,
+          after,
+        });
+        for (const node of data.orders.nodes) ids.push(numericId(node.id));
+        after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+      } while (after);
+      return ids;
+    },
+
+    async searchProducts(text) {
+      const query = productSearchQuery(text);
+      if (!query) return [];
+      const data = await run(PRODUCT_SEARCH_QUERY, { query });
+      return data.products.nodes.map((p: { id: string; handle: string; title: string; status: string; tags: string[] }) => ({
+        shopifyProductId: numericId(p.id),
+        handle: p.handle,
+        title: p.title,
+        status: p.status,
+        tags: p.tags ?? [],
+      }));
     },
   };
 }

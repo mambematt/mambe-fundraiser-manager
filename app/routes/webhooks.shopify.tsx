@@ -8,6 +8,7 @@ import {
   resourceIdFor,
 } from "../services/webhooks.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
+import { alertError } from "../services/alerts.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   // 1. Verify the HMAC. Throws a 401 response for anything unsigned or forged.
@@ -29,7 +30,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const shopify = await shopifyClientForShop(shop);
         await processWebhookEvent(db, shopify, eventId);
       } catch (error) {
-        console.error(`Webhook event ${eventId} could not start processing`, error);
+        alertError(error, `Webhook event ${eventId} could not start processing`);
         await db.webhookEvent
           .update({
             where: { id: eventId },
