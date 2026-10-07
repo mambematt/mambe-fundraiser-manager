@@ -75,6 +75,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderName: l.order.name,
       shopifyOrderId: l.order.shopifyOrderId,
       processedAt: l.order.processedAt.toISOString(),
+      source: l.order.source,
+      sourceName: l.order.sourceName,
       product: titles.get(l.shopifyProductId) ?? l.shopifyProductId,
       quantity: l.quantity,
       refundedQuantity: l.refundedQuantity,
@@ -137,6 +139,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return { ok: false, message: "Unknown action", warnings: [] };
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  web: "Online store",
+  pos: "POS",
+  draft: "Draft order",
 };
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -260,6 +268,7 @@ export default function Index() {
             <s-table-header-row>
               <s-table-header>Order</s-table-header>
               <s-table-header>Checkout (Pacific)</s-table-header>
+              <s-table-header>Source</s-table-header>
               <s-table-header>Product</s-table-header>
               <s-table-header format="numeric">Qty</s-table-header>
               <s-table-header format="numeric">Refunded</s-table-header>
@@ -277,6 +286,7 @@ export default function Index() {
                     </s-link>
                   </s-table-cell>
                   <s-table-cell>{pacific(l.processedAt)}</s-table-cell>
+                  <s-table-cell>{SOURCE_LABELS[l.source] ?? l.sourceName ?? "—"}</s-table-cell>
                   <s-table-cell>{l.product}</s-table-cell>
                   <s-table-cell>{l.quantity}</s-table-cell>
                   <s-table-cell>{l.refundedQuantity}</s-table-cell>
