@@ -1,0 +1,115 @@
+# Render Blueprint for the Mambe Fundraiser Manager.
+#
+# Two separate copies:
+#   staging    – deploys from the "main" branch, connected to the dev store
+#   production – deploys from the "production" branch, connected to mambeblankets.com
+# Each has its own web service, Postgres database and cron job. Both deploy
+# only after the GitHub "Tests" check passes.
+#
+# Plan names: Render now names plans by size. "0.5c-512mb" is the former
+# Starter web plan; "0.1c-256mb" is the former Basic-256mb Postgres plan.
+# Confirm the prices on the Blueprint preview screen before applying.
+
+services:
+  # ---------------------------------------------------------------- staging
+  - type: web
+    name: mambe-fundraisers-staging
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mambe-fundraisers-staging-db
+          property: connectionString
+      - key: SCOPES
+        value: read_orders,read_all_orders,read_products,read_inventory,write_products,write_online_store_navigation
+      # From the staging app in the Shopify Partner Dashboard (Client ID / Client secret).
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+
+  - type: cron
+    name: mambe-fundraisers-staging-cron
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    branch: main
+    schedule: "0 10 * * *" # 3:00 AM Pacific (PDT); stub for now
+    buildCommand: echo "stub, nothing to build"
+    startCommand: node scripts/cron-stub.mjs
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mambe-fundraisers-staging-db
+          property: connectionString
+
+  # ------------------------------------------------------------- production
+  - type: web
+    name: mambe-fundraisers
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    branch: production
+    autoDeployTrigger: checksPass
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mambe-fundraisers-db
+          property: connectionString
+      - key: SCOPES
+        value: read_orders,read_all_orders,read_products,read_inventory,write_products,write_online_store_navigation
+      # From the production app in the Shopify Partner Dashboard.
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+
+  - type: cron
+    name: mambe-fundraisers-cron
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    branch: production
+    schedule: "0 10 * * *" # 3:00 AM Pacific (PDT); stub for now
+    buildCommand: echo "stub, nothing to build"
+    startCommand: node scripts/cron-stub.mjs
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mambe-fundraisers-db
+          property: connectionString
+
+databases:
+  - name: mambe-fundraisers-staging-db
+    databaseName: mambe_fundraisers_staging
+    plan: 0.1c-256mb
+    region: oregon
+    postgresMajorVersion: "17"
+    ipAllowList: [] # only Render services can connect
+
+  - name: mambe-fundraisers-db
+    databaseName: mambe_fundraisers
+    plan: 0.1c-256mb
+    region: oregon
+    postgresMajorVersion: "17"
+    ipAllowList: [] # only Render services can connect
