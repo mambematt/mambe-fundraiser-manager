@@ -6,7 +6,8 @@
 // - Shopify IDs are stored as their numeric ID in a string ("5551234567890").
 //
 // Constraints Prisma can't express live in raw SQL in the migration:
-// - fundraisers_no_overlap (btree_gist exclusion constraint)
+// - fundraisers_no_overlap (btree_gist exclusion constraint; a cancelled
+//   fundraiser's window ends at cancelled_at, declined ones are ignored)
 // - audit_log is append-only (trigger refuses UPDATE and DELETE)
 // - organizers.email must be lowercase (check constraint)
 
@@ -371,11 +372,26 @@ model AuditLog {
   action    String
   before    Json?
   after     Json?
+  reason    String?
   actor     String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([entity, entityId])
   @@map("audit_log")
+}
+
+// One row per scheduled job run (status clock, nightly re-check).
+model JobRun {
+  id         Int       @id @default(autoincrement())
+  name       String // clock | nightly
+  status     String    @default("running") // running | succeeded | failed
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(3)
+  details    Json?
+  error      String?
+
+  @@index([name, startedAt])
+  @@map("job_runs")
 }
 
 // One row per Shopify webhook delivery. No payload is stored (order payloads

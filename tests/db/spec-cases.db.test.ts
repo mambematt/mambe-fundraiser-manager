@@ -89,9 +89,16 @@ describe("Attribution and payout test cases that need the database (spec)", () =
     ).rejects.toThrow(/fundraisers_no_overlap|23P01|exclusion/i);
     expect(await db.fundraiser.count()).toBe(1);
 
-    // Declined and cancelled fundraisers don't block (the constraint skips them).
+    // Declined fundraisers never block.
     await insertFundraiser({ publicCode: "CHS-GLAX-DECL", teamId: team.id, productId: product.id, startDate: "2026-10-15", endDate: "2026-11-15", status: "declined" });
-    await insertFundraiser({ publicCode: "CHS-GLAX-CANC", teamId: team.id, productId: product.id, startDate: "2026-10-15", endDate: "2026-11-15", status: "cancelled" });
+
+    // Owner decision 2026-10-07: a cancelled fundraiser keeps its window up to
+    // the moment it was cancelled. Overlapping that part is refused…
+    await expect(
+      insertFundraiser({ publicCode: "CHS-GLAX-C1", teamId: team.id, productId: product.id, startDate: "2026-09-15", endDate: "2026-10-20", status: "cancelled", cancelledAt: pt("2026-10-05T12:00:00") }),
+    ).rejects.toThrow(/fundraisers_no_overlap|23P01|exclusion/i);
+    // …but a fundraiser cancelled before the overlap begins doesn't block.
+    await insertFundraiser({ publicCode: "CHS-GLAX-C2", teamId: team.id, productId: product.id, startDate: "2026-09-01", endDate: "2026-10-15", status: "cancelled", cancelledAt: pt("2026-09-20T12:00:00") });
 
     // A different product with the same dates is fine.
     const other = await db.product.create({ data: { shopifyProductId: "2001", handle: "other", title: "Other cape", status: "ACTIVE" } });

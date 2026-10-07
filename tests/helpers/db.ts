@@ -49,6 +49,7 @@ export async function insertFundraiser(args: {
   startDate: string;
   endDate: string;
   status?: string;
+  cancelledAt?: Date;
 }) {
   const window = computeWindow(args.startDate, args.endDate);
   return testDb().fundraiser.create({
@@ -61,6 +62,7 @@ export async function insertFundraiser(args: {
       windowStart: window.start,
       windowEnd: window.end,
       status: args.status ?? "active",
+      cancelledAt: args.cancelledAt ?? null,
     },
   });
 }
