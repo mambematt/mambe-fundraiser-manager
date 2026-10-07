@@ -31,3 +31,8 @@ locally (git-ignored) and in Render environment variables.
 ## Deploys
 `main` → Render staging (dev store). `production` branch → Render production
 (mambeblankets.com). Both deploy only after the GitHub "Tests" check passes.
+
+## Shopify apps
+Two apps, one config file each: `shopify.app.staging.toml` (dev store) and
+`shopify.app.production.toml` (mambeblankets.com). Scopes and webhooks must stay
+identical in both. On this Windows machine run the CLI as `shopify.cmd`.
