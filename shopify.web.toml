@@ -2,10 +2,6 @@ name = "React Router"
 roles = ["frontend", "backend"]
 webhooks_path = "/webhooks/app/uninstalled"
 
-{%- assign exec = dependency_manager | append: ' exec' -%}
-{%- if dependency_manager == 'yarn' -%}
-{%- assign exec = 'yarn' -%}
-{%- endif %}
 [commands]
-predev = "{{ exec }} prisma generate"
-dev = "{{ exec }} prisma migrate deploy && {{ exec }} react-router dev"
+predev = "npx prisma generate"
+dev = "npx prisma migrate deploy && npx react-router dev"

@@ -1,0 +1,45 @@
+# Staging app: installed on the dev store, served by Render "mambe-fundraisers-staging".
+# Keep access_scopes and webhooks identical to shopify.app.production.toml.
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "edb83d5987c067ae97df77116c63d768"
+name = "Mambe Fundraisers Staging"
+application_url = "https://mambe-fundraisers-staging.onrender.com"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
+
+[access_scopes]
+scopes = "read_orders,read_all_orders,read_products,read_inventory,write_products,write_online_store_navigation"
+
+[auth]
+redirect_urls = [ "https://mambe-fundraisers-staging.onrender.com/auth/callback" ]
+
+[webhooks]
+# Matches the library's ApiVersion.October26 in app/shopify.server.ts.
+api_version = "2026-10"
+
+  # Handled by: /app/routes/webhooks.shopify.tsx
+  [[webhooks.subscriptions]]
+  topics = [
+    "orders/create",
+    "orders/updated",
+    "orders/paid",
+    "orders/cancelled",
+    "refunds/create",
+    "products/update",
+    "products/delete",
+  ]
+  uri = "/webhooks/shopify"
+
+  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
