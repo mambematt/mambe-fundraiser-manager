@@ -1,6 +1,7 @@
 // The 24 owner-approved cases from docs/SPEC.md, "Attribution and payout test
 // cases". Numbered to match the spec. Cases that need the database are in
-// tests/db/spec-cases.db.test.ts; cases that need later build steps are
+// tests/db/spec-cases.db.test.ts and tests/db/lifecycle.db.test.ts; cases
+// that need later build steps are
 // test.todo here with their number.
 //
 // Sample fundraiser: Central High Girls Lacrosse, Oct 1–31 2026, $25 per cape.
@@ -261,9 +262,10 @@ describe("Attribution and payout test cases (spec)", () => {
     expect(totals([...before, ...after])).toMatchObject({ qualifyingUnits: 12, estimatedPayoutCents: 30000 });
   });
 
-  test.todo("Case 19: start date changed Oct 1 → Oct 5 after sales; preview matches saved numbers; logged with reason (session 2)");
+  // Case 19 (date change preview and save) is in tests/db/lifecycle.db.test.ts.
 
-  test.todo("Case 20: a paid order's webhooks never arrive; nightly re-check adds it, settlement re-pull confirms it (session 2 + settlement)");
+  // Case 20's nightly re-check half is in tests/db/lifecycle.db.test.ts.
+  test.todo("Case 20: the settlement re-pull confirms the order the nightly re-check added (settlement)");
 
   test.todo("Case 21: settlement re-pull fails; stays in Settling, flagged, no payout calculated (settlement)");
 

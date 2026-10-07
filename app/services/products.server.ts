@@ -7,6 +7,7 @@ import { numericId } from "../lib/shopify-ids";
 import type { ShopifyClient } from "./shopify-api.server";
 import { syncOrderFromShopify } from "./order-sync.server";
 import { writeAudit } from "./audit.server";
+import { alert } from "./alerts.server";
 
 export const FUNDRAISER_TAG = "fundraiser";
 
@@ -27,9 +28,34 @@ export function parseProductReference(input: string): string {
 
 export interface LinkResult {
   productId: number;
+  shopifyProductId: string;
   title: string;
   alreadyLinked: boolean;
   warnings: string[];
+}
+
+/** Product details an admin may edit in the app. */
+export async function updateProductDetails(
+  db: PrismaClient,
+  id: number,
+  input: { teamId: number | null; designNotes: string | null },
+  actor: string,
+) {
+  const product = await db.product.findUniqueOrThrow({ where: { id } });
+  if (product.teamId && input.teamId !== product.teamId) {
+    const used = await db.fundraiser.count({ where: { productId: id } });
+    if (used) throw new Error("This product already has fundraisers for its team, so its team can't change.");
+  }
+  const after = { teamId: input.teamId, designNotes: input.designNotes?.trim() || null };
+  await db.product.update({ where: { id }, data: after });
+  await writeAudit(db, {
+    entity: "product",
+    entityId: id,
+    action: "edit",
+    before: { teamId: product.teamId, designNotes: product.designNotes },
+    after,
+    actor,
+  });
 }
 
 export async function linkProduct(
@@ -42,14 +68,14 @@ export async function linkProduct(
   const info = await shopify.fetchProduct(shopifyProductId);
   if (!info) throw new Error(`No Shopify product with ID ${shopifyProductId}`);
 
+  if (info.status !== "ACTIVE") {
+    throw new Error(`"${info.title}" is ${info.status.toLowerCase()} in Shopify. Only active products can be linked.`);
+  }
   const warnings: string[] = [];
   if (!hasFundraiserTag(info.tags)) {
     warnings.push(
       `"${info.title}" doesn't have the tag "${FUNDRAISER_TAG}", so discount codes may not be blocked on it. Add the tag in Shopify.`,
     );
-  }
-  if (info.status !== "ACTIVE") {
-    warnings.push(`"${info.title}" is ${info.status.toLowerCase()} in Shopify, not active.`);
   }
 
   const existing = await db.product.findUnique({ where: { shopifyProductId } });
@@ -75,7 +101,7 @@ export async function linkProduct(
       actor,
     });
   }
-  return { productId: product.id, title: info.title, alreadyLinked: !!existing, warnings };
+  return { productId: product.id, shopifyProductId, title: info.title, alreadyLinked: !!existing, warnings };
 }
 
 /** products/update: refresh title, handle, status and tags of a linked product. */
@@ -189,6 +215,9 @@ export async function backfillProduct(
     await db.product.update({ where: { id: product.id }, data: { backfilledAt: new Date() } });
   }
   const summary = { ordersFound: orderIds.length, ordersSaved, failures, totals };
+  if (failures.length) {
+    alert(`Backfill of "${product.title}" missed ${failures.length} order(s)`, { failures: failures.slice(0, 5) });
+  }
   await writeAudit(db, {
     entity: "product",
     entityId: product.id,

@@ -17,6 +17,9 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.SingleMerchant,
+  // Staff sign in individually so the audit log and checklist record who
+  // did what. Background work still uses the shop's offline session.
+  useOnlineTokens: true,
   future: {
     expiringOfflineAccessTokens: true,
   },

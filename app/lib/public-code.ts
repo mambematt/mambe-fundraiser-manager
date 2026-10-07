@@ -28,6 +28,7 @@ const IGNORED_WORDS = new Set(["the", "of", "and", "a", "an", "at", "for"]);
 
 function words(text: string): string[] {
   return text
+    .replace(/['’]/g, "")
     .replace(/[^A-Za-z0-9 ]+/g, " ")
     .split(/\s+/)
     .filter((w) => w && !IGNORED_WORDS.has(w.toLowerCase()));
