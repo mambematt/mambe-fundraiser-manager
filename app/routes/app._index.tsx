@@ -9,7 +9,8 @@ import { ResultBanner } from "../components/ResultBanner";
 import { REVIEW_FLAG_LABELS, type ReviewFlag } from "../lib/attribution";
 import { pacific } from "../lib/format";
 import { formatCents } from "../lib/money";
-import { attempt } from "../services/actions.server";
+import { attempt, formText } from "../services/actions.server";
+import { alert, flushAlerts } from "../services/alerts.server";
 import { runNightlyRecheck } from "../services/jobs.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 
@@ -72,7 +73,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const form = await request.formData();
   return attempt(async () => {
+    if (formText(form, "intent") === "testAlert") {
+      if (!process.env.SENTRY_DSN) return { ok: false, message: "SENTRY_DSN isn't set on this service in Render." };
+      alert(`Test alert from ${process.env.RENDER_SERVICE_NAME ?? "the app"}. Alerts reach Sentry; no action needed.`);
+      await flushAlerts();
+      return { ok: true, message: "Test alert sent. It should appear in Sentry → Issues within a minute, and Sentry should email you." };
+    }
     const shopify = await shopifyClientForShop(session.shop);
     const result = await runNightlyRecheck(db, shopify);
     if (result.status === "failed") return { ok: false, message: `Nightly re-check failed: ${result.error}` };
@@ -172,9 +180,16 @@ export default function Index() {
             ? ` · last attempt ${data.jobs.nightly.status} ${pacific(data.jobs.nightly.at)}${data.jobs.nightly.error ? `: ${data.jobs.nightly.error}` : ""}`
             : ""}
         </s-paragraph>
-        <Form method="post">
-          <s-button type="submit" disabled={busy}>Run nightly re-check now</s-button>
-        </Form>
+        <s-stack direction="inline" gap="base">
+          <Form method="post">
+            <input type="hidden" name="intent" value="nightly" />
+            <s-button type="submit" disabled={busy}>Run nightly re-check now</s-button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="intent" value="testAlert" />
+            <s-button type="submit" variant="tertiary" disabled={busy}>Send a test alert</s-button>
+          </Form>
+        </s-stack>
         {data.webhooks.recent.length > 0 && (
           <s-table>
             <s-table-header-row>
