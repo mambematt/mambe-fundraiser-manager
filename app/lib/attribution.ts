@@ -227,12 +227,16 @@ export interface StoredLineForTotals {
   outcome: string;
   reviewFlags: string[];
   adminDecision: string | null;
+  /** For fundraiser revenue; optional so callers that only need units can omit it. */
+  unitPriceCents?: number;
 }
 
 export interface FundraiserTotals {
   qualifyingUnits: number;
   /** Qualifying units × rate. Estimated until the payout is frozen. */
   estimatedPayoutCents: number;
+  /** Line price × qualifying units (what customers paid, before discounts). */
+  revenueCents: number;
   /** Flagged lines with no admin decision yet. Must be 0 to approve a payout. */
   unresolvedFlaggedLines: number;
   refundedOrCancelledLines: number;
@@ -248,13 +252,17 @@ export function fundraiserTotals(
   const totals: FundraiserTotals = {
     qualifyingUnits: 0,
     estimatedPayoutCents: 0,
+    revenueCents: 0,
     unresolvedFlaggedLines: 0,
     refundedOrCancelledLines: 0,
     excludedLines: 0,
   };
   for (const line of lines) {
     if (line.attributedFundraiserId !== fundraiserId) continue;
-    if (line.outcome === "qualifying") totals.qualifyingUnits += line.qualifyingUnits;
+    if (line.outcome === "qualifying") {
+      totals.qualifyingUnits += line.qualifyingUnits;
+      totals.revenueCents += line.qualifyingUnits * (line.unitPriceCents ?? 0);
+    }
     if (line.outcome === "refunded_cancelled") totals.refundedOrCancelledLines += 1;
     if (line.outcome === "excluded") totals.excludedLines += 1;
     if (
@@ -348,5 +356,38 @@ export function productLifetimeTotals(lines: StoredLineForLifetime[], now: Date 
   }
   totals.orders = orders.size;
   totals.ordersOlderThan60Days = oldOrders.size;
+  return totals;
+}
+
+export interface StoredLineForPeriod {
+  processedAt: Date;
+  outcome: string;
+  qualifyingUnits: number;
+  quantity: number;
+  refundedQuantity: number;
+  currentQuantity: number;
+  /** The attributed fundraiser's rate, if any. */
+  payoutRateCents: number | null;
+}
+
+export interface PeriodTotals {
+  qualifyingUnits: number;
+  estimatedPayoutCents: number;
+  /** Net units on linked products sold outside every fundraiser window. */
+  outsideWindowUnits: number;
+}
+
+/** Totals for lines whose checkout time falls in [start, end]. Test orders on the live store have outcome test_order and never count. */
+export function periodTotals(lines: StoredLineForPeriod[], start: Date, end: Date): PeriodTotals {
+  const totals: PeriodTotals = { qualifyingUnits: 0, estimatedPayoutCents: 0, outsideWindowUnits: 0 };
+  for (const line of lines) {
+    const t = line.processedAt.getTime();
+    if (t < start.getTime() || t > end.getTime()) continue;
+    if (line.outcome === "qualifying") {
+      totals.qualifyingUnits += line.qualifyingUnits;
+      totals.estimatedPayoutCents += line.qualifyingUnits * (line.payoutRateCents ?? 0);
+    }
+    if (line.outcome === "non_fundraiser") totals.outsideWindowUnits += netUnits(line);
+  }
   return totals;
 }

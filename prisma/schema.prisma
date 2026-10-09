@@ -86,8 +86,8 @@ model Organizer {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  fundraisers   FundraiserOrganizer[]
-  loginTokens   PortalLoginToken[]
+  fundraisers    FundraiserOrganizer[]
+  loginTokens    PortalLoginToken[]
   portalSessions PortalSession[]
 
   @@map("organizers")
@@ -130,17 +130,17 @@ model Product {
 }
 
 model Fundraiser {
-  id         Int      @id @default(autoincrement())
-  publicCode String   @unique @map("public_code") // e.g. CHS-GLAX-F26
-  teamId     Int      @map("team_id")
-  productId  Int      @map("product_id")
+  id          Int     @id @default(autoincrement())
+  publicCode  String  @unique @map("public_code") // e.g. CHS-GLAX-F26
+  teamId      Int     @map("team_id")
+  productId   Int     @map("product_id")
   seasonLabel String? @map("season_label")
 
   // Calendar dates in the fundraiser's timezone. The window below is computed
   // from these by app/lib/window.ts and nothing else.
-  startDate DateTime @map("start_date") @db.Date
-  endDate   DateTime @map("end_date") @db.Date
-  timezone  String   @default("America/Los_Angeles")
+  startDate   DateTime @map("start_date") @db.Date
+  endDate     DateTime @map("end_date") @db.Date
+  timezone    String   @default("America/Los_Angeles")
   // Half-open [window_start, window_end) in UTC.
   windowStart DateTime @map("window_start") @db.Timestamptz(3)
   windowEnd   DateTime @map("window_end") @db.Timestamptz(3)
@@ -149,19 +149,19 @@ model Fundraiser {
   status          String @default("setup") // allowed transitions live in code
 
   // Setup checklist: each item records when and by whom.
-  organizerInfoReceivedAt  DateTime? @map("organizer_info_received_at") @db.Timestamptz(3)
-  organizerInfoReceivedBy  String?   @map("organizer_info_received_by")
-  artworkApprovedAt        DateTime? @map("artwork_approved_at") @db.Timestamptz(3)
-  artworkApprovedBy        String?   @map("artwork_approved_by")
-  productReadyAt           DateTime? @map("product_ready_at") @db.Timestamptz(3)
-  productReadyBy           String?   @map("product_ready_by")
-  assetsUploadedAt         DateTime? @map("assets_uploaded_at") @db.Timestamptz(3)
-  assetsUploadedBy         String?   @map("assets_uploaded_by")
-  driveFoldersCreatedAt    DateTime? @map("drive_folders_created_at") @db.Timestamptz(3)
-  driveFoldersCreatedBy    String?   @map("drive_folders_created_by")
-  launchPackageReviewedAt  DateTime? @map("launch_package_reviewed_at") @db.Timestamptz(3)
-  launchPackageReviewedBy  String?   @map("launch_package_reviewed_by")
-  waitingOnOrganizerSince  DateTime? @map("waiting_on_organizer_since") @db.Timestamptz(3)
+  organizerInfoReceivedAt DateTime? @map("organizer_info_received_at") @db.Timestamptz(3)
+  organizerInfoReceivedBy String?   @map("organizer_info_received_by")
+  artworkApprovedAt       DateTime? @map("artwork_approved_at") @db.Timestamptz(3)
+  artworkApprovedBy       String?   @map("artwork_approved_by")
+  productReadyAt          DateTime? @map("product_ready_at") @db.Timestamptz(3)
+  productReadyBy          String?   @map("product_ready_by")
+  assetsUploadedAt        DateTime? @map("assets_uploaded_at") @db.Timestamptz(3)
+  assetsUploadedBy        String?   @map("assets_uploaded_by")
+  driveFoldersCreatedAt   DateTime? @map("drive_folders_created_at") @db.Timestamptz(3)
+  driveFoldersCreatedBy   String?   @map("drive_folders_created_by")
+  launchPackageReviewedAt DateTime? @map("launch_package_reviewed_at") @db.Timestamptz(3)
+  launchPackageReviewedBy String?   @map("launch_package_reviewed_by")
+  waitingOnOrganizerSince DateTime? @map("waiting_on_organizer_since") @db.Timestamptz(3)
 
   shortUrl         String?   @map("short_url")
   paypalPayeeEmail String?   @map("paypal_payee_email") // the organization's account
@@ -330,17 +330,23 @@ model PayoutAdjustment {
 }
 
 model Asset {
-  id           Int      @id @default(autoincrement())
-  fundraiserId Int      @map("fundraiser_id")
+  id           Int       @id @default(autoincrement())
+  fundraiserId Int       @map("fundraiser_id")
   kind         String // flyer | email_copy | social_image | other
   title        String
   url          String?
-  driveFileId  String?  @map("drive_file_id")
-  visibility   String   @default("internal") // internal | organizer
-  isCurrent    Boolean  @default(true) @map("is_current")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  driveFileId  String?   @map("drive_file_id")
+  visibility   String    @default("internal") // internal | organizer
+  isCurrent    Boolean   @default(true) @map("is_current")
+  // When replaced: the asset that replaced this one.
+  replacedById Int?      @map("replaced_by_id")
+  replacedAt   DateTime? @map("replaced_at") @db.Timestamptz(3)
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   fundraiser Fundraiser @relation(fields: [fundraiserId], references: [id])
+  replacedBy Asset?     @relation("AssetReplacement", fields: [replacedById], references: [id])
+  replaces   Asset[]    @relation("AssetReplacement")
 
   @@index([fundraiserId])
   @@map("assets")
