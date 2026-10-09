@@ -1,7 +1,7 @@
 // Database guard rails and the order sync rules (beyond the 24 spec cases).
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { normalizeOrder } from "../../app/lib/shopify-order";
-import { saveOrder } from "../../app/services/order-sync.server";
+import { reattributeProduct, saveOrder } from "../../app/services/order-sync.server";
 import { backfillProduct, linkProduct, markProductDeleted } from "../../app/services/products.server";
 import type { ShopifyClient } from "../../app/services/shopify-api.server";
 import { writeAudit } from "../../app/services/audit.server";
@@ -63,6 +63,27 @@ describe("order sync", () => {
     // Re-saving the same state changes nothing and logs nothing new.
     await saveOrder(db, parsed.order, parsed.lines);
     expect(await db.auditLog.count({ where: { entity: "order_line_item" } })).toBe(1);
+  });
+
+  test("test orders follow the COUNT_TEST_ORDERS setting", async () => {
+    const { team, product } = await seedTeamAndProduct(CAPE);
+    await insertFundraiser({ publicCode: "CHS-GLAX-F26", teamId: team.id, productId: product.id, startDate: "2026-10-01", endDate: "2026-10-31" });
+    const parsed = normalizeOrder(shopifyOrderNode({ id: "8", test: true, lines: [{ id: "80", productId: CAPE, quantity: 1 }] }));
+    expect(parsed.order.isTest).toBe(true);
+
+    const before = process.env.COUNT_TEST_ORDERS;
+    try {
+      delete process.env.COUNT_TEST_ORDERS; // live store
+      await saveOrder(db, parsed.order, parsed.lines);
+      expect(await db.orderLineItem.findFirstOrThrow()).toMatchObject({ outcome: "test_order", qualifyingUnits: 0 });
+
+      process.env.COUNT_TEST_ORDERS = "true"; // staging
+      await reattributeProduct(db, CAPE);
+      expect(await db.orderLineItem.findFirstOrThrow()).toMatchObject({ outcome: "qualifying", qualifyingUnits: 1 });
+    } finally {
+      if (before === undefined) delete process.env.COUNT_TEST_ORDERS;
+      else process.env.COUNT_TEST_ORDERS = before;
+    }
   });
 
   test("locked lines are never re-attributed", async () => {

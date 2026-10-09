@@ -43,6 +43,7 @@ export function order(overrides: Partial<AttributionOrder> = {}): AttributionOrd
     financialStatus: "PAID",
     source: "web",
     hasMoneyOnlyRefund: false,
+    isTest: false,
     ...overrides,
   };
 }
@@ -72,6 +73,7 @@ export function shopifyOrderNode(args: {
   cancelledAt?: Date | null;
   financialStatus?: string;
   sourceName?: string;
+  test?: boolean;
   refunds?: Array<{ amount: string; lines: Array<{ lineId: string; quantity: number }> }>;
   lines: Array<{
     id: string;
@@ -91,7 +93,7 @@ export function shopifyOrderNode(args: {
     cancelledAt: args.cancelledAt ? args.cancelledAt.toISOString() : null,
     displayFinancialStatus: args.financialStatus ?? "PAID",
     sourceName: args.sourceName ?? "web",
-    test: false,
+    test: args.test ?? false,
     discountCodes: [],
     refunds: (args.refunds ?? []).map((r, i) => ({
       id: `gid://shopify/Refund/${i + 1}`,

@@ -46,7 +46,9 @@ export type LineOutcome =
   /** In a window but flagged and excluded by an admin. */
   | "excluded"
   /** In a window but the order isn't paid (pending, authorized, voided…). */
-  | "not_eligible";
+  | "not_eligible"
+  /** A Shopify test order, on a store set to ignore them (the live store). */
+  | "test_order";
 
 export type AdminDecision = "include" | "exclude";
 
@@ -59,7 +61,20 @@ export interface AttributionOrder {
   source: OrderSource;
   /** A refund on this order returned money without returning any units. */
   hasMoneyOnlyRefund: boolean;
+  /** Shopify marks orders paid with a test gateway as test orders. */
+  isTest: boolean;
 }
+
+export interface AttributionOptions {
+  /**
+   * Count Shopify test orders like real ones. Owner decision 2026-10-09: the
+   * live store ignores them; the dev store (staging) counts them so it can be
+   * tested with test-gateway orders.
+   */
+  countTestOrders: boolean;
+}
+
+export const DEFAULT_ATTRIBUTION_OPTIONS: AttributionOptions = { countTestOrders: false };
 
 export interface LineAttribution {
   /** The fundraiser whose window contains the sale, if any. */
@@ -141,7 +156,9 @@ export function attributeOrder(
   order: AttributionOrder,
   lines: AttributionLine[],
   fundraisers: AttributionFundraiser[],
+  options: AttributionOptions = DEFAULT_ATTRIBUTION_OPTIONS,
 ): AttributedLine[] {
+  const ignoredTest = order.isTest && !options.countTestOrders;
   const orderCancelled = order.cancelledAt !== null;
   const orderEligible = ELIGIBLE_FINANCIAL_STATUSES.has(order.financialStatus);
   const fullyRefunded = order.financialStatus === "REFUNDED";
@@ -150,7 +167,7 @@ export function attributeOrder(
   const matched = lines.map((line) => {
     const candidates = matchingFundraisers(line, order.processedAt, fundraisers);
     const units = netUnits(line);
-    const countsAsUnits = !orderCancelled && !fullyRefunded && units > 0;
+    const countsAsUnits = !orderCancelled && !fullyRefunded && units > 0 && !ignoredTest;
     return { line, candidates, fundraiser: candidates[0] ?? null, units, countsAsUnits };
   });
 
@@ -175,6 +192,9 @@ export function attributeOrder(
 
     const fundraiserId = fundraiser?.id ?? null;
 
+    if (ignoredTest) {
+      return { key: line.key, fundraiserId, netUnits: units, qualifyingUnits: 0, outcome: "test_order", flags: [] };
+    }
     if (!countsAsUnits) {
       return { key: line.key, fundraiserId, netUnits: units, qualifyingUnits: 0, outcome: "refunded_cancelled", flags: [] };
     }

@@ -99,6 +99,19 @@ describe("attribution engine details", () => {
     expect(r.qualifyingUnits).toBe(1);
   });
 
+  test("Shopify test orders: ignored on the live store, counted on staging (owner decision 2026-10-09)", () => {
+    const testOrder = order({ isTest: true });
+    const [live] = attributeOrder(testOrder, [line({ quantity: 2 })], [F]);
+    expect(live).toMatchObject({ fundraiserId: 1, qualifyingUnits: 0, outcome: "test_order", flags: [] });
+
+    const [staging] = attributeOrder(testOrder, [line({ quantity: 2 })], [F], { countTestOrders: true });
+    expect(staging).toMatchObject({ fundraiserId: 1, qualifyingUnits: 2, outcome: "qualifying" });
+
+    // An ignored test order never trips the bulk flag either.
+    const [bulk] = attributeOrder(testOrder, [line({ quantity: 6 })], [F]);
+    expect(bulk.flags).toEqual([]);
+  });
+
   test("net units never go negative", () => {
     expect(netUnits({ quantity: 1, refundedQuantity: 2, currentQuantity: 0 })).toBe(0);
   });

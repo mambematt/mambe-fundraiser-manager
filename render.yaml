@@ -42,6 +42,10 @@ services:
         sync: false
       - key: SHOPIFY_API_SECRET
         sync: false
+      # The dev store only has test-gateway orders, so staging counts them.
+      # Production leaves this unset: Shopify test orders never count there.
+      - key: COUNT_TEST_ORDERS
+        value: "true"
       # Shared with the cron job, which sends it to /jobs/clock.
       - key: CRON_SECRET
         generateValue: true

@@ -18,6 +18,7 @@ import {
 import { normalizeOrder, type NormalizedLine, type NormalizedOrder } from "../lib/shopify-order";
 import type { ShopifyClient } from "./shopify-api.server";
 import { writeAudit } from "./audit.server";
+import { attributionOptions } from "./settings.server";
 
 type Tx = Prisma.TransactionClient;
 
@@ -191,9 +192,11 @@ export function runEngineOnOrder(order: OrderWithLines, fundraisers: Attribution
       financialStatus: order.financialStatus,
       source: order.source as OrderSource,
       hasMoneyOnlyRefund: order.hasMoneyOnlyRefund,
+      isTest: order.isTest,
     },
     inputs,
     fundraisers,
+    attributionOptions(),
   );
 }
 

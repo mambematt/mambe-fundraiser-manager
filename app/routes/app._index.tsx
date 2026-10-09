@@ -101,6 +101,7 @@ const OUTCOME_LABELS: Record<string, string> = {
   refunded_cancelled: "Refunded / cancelled",
   excluded: "Excluded",
   not_eligible: "Not paid",
+  test_order: "Test order (not counted)",
   pending: "Pending",
 };
 
