@@ -6,7 +6,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { ResultBanner } from "../components/ResultBanner";
-import { dollars, pacific } from "../lib/format";
+import { calendarDate, dollars, pacific } from "../lib/format";
+import { STATUS_LABELS, type FundraiserStatus } from "../lib/status";
+import { storedTotals } from "../services/fundraisers.server";
 import { attempt, formInt, formText } from "../services/actions.server";
 import { alertError } from "../services/alerts.server";
 import {
@@ -18,6 +20,15 @@ import {
 } from "../services/products.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 import { staffName } from "../services/staff.server";
+
+async function costCoverage(shopifyProductId: string) {
+  const [lines, recorded, approximate] = await Promise.all([
+    db.orderLineItem.count({ where: { shopifyProductId } }),
+    db.orderLineItem.count({ where: { shopifyProductId, unitCostCents: { not: null } } }),
+    db.orderLineItem.count({ where: { shopifyProductId, costApproximate: true } }),
+  ]);
+  return { lines, recorded, approximate, missing: lines - recorded };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -60,6 +71,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           ? `${lastBackfill.action === "backfill" ? "Done" : "Incomplete"} ${pacific(lastBackfill.createdAt)} · ${result?.ordersFound ?? 0} orders`
           : "Running or not run yet",
         totals: await lifetimeTotalsForProduct(db, p.shopifyProductId),
+        costCoverage: await costCoverage(p.shopifyProductId),
+        fundraisers: await Promise.all(
+          (await db.fundraiser.findMany({ where: { productId: p.id }, orderBy: { windowStart: "desc" } })).map(async (f) => ({
+            id: f.id,
+            publicCode: f.publicCode,
+            status: STATUS_LABELS[f.status as FundraiserStatus] ?? f.status,
+            dates: `${calendarDate(f.startDate)} – ${calendarDate(f.endDate)}`,
+            units: (await storedTotals(db, f)).qualifyingUnits,
+          })),
+        ),
       };
     }),
   );
@@ -196,6 +217,22 @@ export default function Products() {
                     {p.totals.refundedOrCancelledUnits} units refunded/cancelled · In fundraiser windows{" "}
                     {p.totals.inWindowUnits} units, {dollars(p.totals.inWindowRevenueCents)} · Outside windows{" "}
                     {p.totals.outsideWindowUnits} units, {dollars(p.totals.outsideWindowRevenueCents)}
+                  </s-text>
+                  <s-text color="subdued">
+                    Unit cost: recorded on {p.costCoverage.recorded} of {p.costCoverage.lines} lines
+                    {p.costCoverage.approximate > 0 ? ` (${p.costCoverage.approximate} approximate: loaded by backfill with the cost on the day of linking)` : ""}
+                    {p.costCoverage.missing > 0 ? ` · ${p.costCoverage.missing} with no cost set in Shopify` : ""}
+                  </s-text>
+                  <s-text>
+                    Fundraisers:{" "}
+                    {p.fundraisers.length === 0
+                      ? "none yet"
+                      : p.fundraisers.map((f, i) => (
+                          <span key={f.id}>
+                            {i > 0 ? " · " : ""}
+                            <s-link href={`/app/fundraisers/${f.id}`}>{f.publicCode}</s-link> ({f.dates}, {f.status}, {f.units} units est.)
+                          </span>
+                        ))}
                   </s-text>
                   <Form method="post">
                     <input type="hidden" name="intent" value="edit" />

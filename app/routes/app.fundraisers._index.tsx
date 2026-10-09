@@ -4,16 +4,20 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { calendarDate, dollars } from "../lib/format";
-import { STATUS_LABELS, type FundraiserStatus } from "../lib/status";
+import { isStatus, STATUS_LABELS, type FundraiserStatus } from "../lib/status";
 import { storedTotals } from "../services/fundraisers.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
+  const statusParam = new URL(request.url).searchParams.get("status") ?? "";
+  const status = isStatus(statusParam) ? statusParam : null;
   const fundraisers = await db.fundraiser.findMany({
+    where: status ? { status } : {},
     orderBy: [{ windowStart: "desc" }],
     include: { team: { include: { organization: true } }, product: true },
   });
   return {
+    statusLabel: status ? STATUS_LABELS[status] : null,
     fundraisers: await Promise.all(
       fundraisers.map(async (f) => {
         const totals = await storedTotals(db, f);
@@ -33,13 +37,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Fundraisers() {
-  const { fundraisers } = useLoaderData<typeof loader>();
+  const { fundraisers, statusLabel } = useLoaderData<typeof loader>();
   return (
-    <s-page heading="Fundraisers">
+    <s-page heading={statusLabel ? `Fundraisers: ${statusLabel}` : "Fundraisers"}>
       <s-button slot="primary-action" variant="primary" href="/app/fundraisers/new">
         New fundraiser
       </s-button>
       <s-section>
+        {statusLabel && (
+          <s-paragraph>
+            Showing {statusLabel} only. <s-link href="/app/fundraisers">Show all</s-link>
+          </s-paragraph>
+        )}
         {fundraisers.length === 0 ? (
           <s-paragraph>No fundraisers yet.</s-paragraph>
         ) : (

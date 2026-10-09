@@ -7,11 +7,12 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { ResultBanner } from "../components/ResultBanner";
 import { REVIEW_FLAG_LABELS, type ReviewFlag } from "../lib/attribution";
-import { pacific } from "../lib/format";
+import { pacific , dollars } from "../lib/format";
 import { formatCents } from "../lib/money";
 import { attempt, formText } from "../services/actions.server";
 import { alert, flushAlerts } from "../services/alerts.server";
 import { runNightlyRecheck } from "../services/jobs.server";
+import { loadNumberStrip, loadWorkQueue } from "../services/dashboard.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -25,6 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     include: { order: true, attributedFundraiser: { select: { publicCode: true } } },
   });
 
+  const [strip, queue] = await Promise.all([loadNumberStrip(db), loadWorkQueue(db)]);
   const [lastWebhook, failedWebhooks, recentEvents, lastClock, lastNightly, lastNightlyOk] = await Promise.all([
     db.webhookEvent.findFirst({ orderBy: { receivedAt: "desc" } }),
     db.webhookEvent.count({ where: { status: "failed" } }),
@@ -37,6 +39,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     run ? { at: run.startedAt.toISOString(), status: run.status, error: run.error?.split("\n")[0] ?? null, details: run.details ? JSON.stringify(run.details) : "" } : null;
 
   return {
+    strip,
+    queue,
     lines: lines.map((l) => ({
       id: l.id,
       orderName: l.order.name,
@@ -114,6 +118,62 @@ export default function Index() {
     <s-page heading="Home">
       <ResultBanner result={result} />
 
+      <s-section>
+        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
+          {[
+            ["Active", String(data.strip.active), "/app/fundraisers?status=active"],
+            ["Scheduled", String(data.strip.scheduled), "/app/fundraisers?status=scheduled"],
+            ["Settling", String(data.strip.settling), "/app/fundraisers?status=settling"],
+            ["Payouts outstanding", dollars(data.strip.payoutsOutstandingCents), "/app/fundraisers?status=payout_pending"],
+            [
+              "This month (est.)",
+              `${data.strip.month.units} units · ${dollars(data.strip.month.estimatedPayoutCents)}`,
+              "/app/fundraisers",
+            ],
+            [
+              "Year to date (est.)",
+              `${data.strip.year.units} units · ${dollars(data.strip.year.estimatedPayoutCents)}`,
+              "/app/fundraisers",
+            ],
+            ["Sold outside windows, 30 days", `${data.strip.outsideWindowUnits30d} units`, "/app/products"],
+          ].map(([label, value, href]) => (
+            <s-clickable key={label} href={href} padding="base" border="base" borderRadius="base">
+              <s-stack gap="small-200">
+                <s-text color="subdued">{label}</s-text>
+                <s-heading>{value}</s-heading>
+              </s-stack>
+            </s-clickable>
+          ))}
+        </s-grid>
+      </s-section>
+
+      <s-section heading="Needs attention">
+        {data.queue.length === 0 ? (
+          <s-paragraph>Nothing needs you right now.</s-paragraph>
+        ) : (
+          <s-stack gap="base">
+            {data.queue.map((g) => (
+              <s-box key={g.key} padding="base" borderWidth="base" borderRadius="base">
+                <s-stack gap="small">
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-badge tone={g.tone}>{String(g.count)}</s-badge>
+                    <s-text type="strong">{g.label}</s-text>
+                  </s-stack>
+                  <s-unordered-list>
+                    {g.items.map((i) => (
+                      <s-list-item key={i.href + i.label}>
+                        <s-link href={i.href}>{i.label}</s-link>
+                        {i.detail ? ` · ${i.detail}` : ""}
+                      </s-list-item>
+                    ))}
+                  </s-unordered-list>
+                </s-stack>
+              </s-box>
+            ))}
+          </s-stack>
+        )}
+      </s-section>
+
       <s-section heading="Recent order lines">
         {data.lines.length === 0 ? (
           <s-paragraph>No order lines saved yet.</s-paragraph>
@@ -166,6 +226,7 @@ export default function Index() {
         )}
       </s-section>
 
+      <div id="sync" />
       <s-section heading="Sync health">
         <s-paragraph>
           Last webhook: {pacific(data.webhooks.lastReceivedAt)} · Failed webhooks:{" "}
