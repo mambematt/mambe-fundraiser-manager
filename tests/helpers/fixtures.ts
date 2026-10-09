@@ -82,6 +82,8 @@ export function shopifyOrderNode(args: {
     currentQuantity?: number;
     price?: string;
     discount?: string;
+    /** A whole-order discount code allocated to this line (totalDiscountSet stays 0). */
+    orderDiscount?: string;
     cost?: string | null;
   }>;
 }): ShopifyOrderNode {
@@ -118,6 +120,10 @@ export function shopifyOrderNode(args: {
         },
         originalUnitPriceSet: { shopMoney: { amount: l.price ?? "195.00" } },
         totalDiscountSet: { shopMoney: { amount: l.discount ?? "0.00" } },
+        discountAllocations: [
+          ...(l.discount ? [{ allocatedAmountSet: { shopMoney: { amount: l.discount } } }] : []),
+          ...(l.orderDiscount ? [{ allocatedAmountSet: { shopMoney: { amount: l.orderDiscount } } }] : []),
+        ],
       })),
       pageInfo: { hasNextPage: false },
     },

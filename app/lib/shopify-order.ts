@@ -40,6 +40,7 @@ export interface ShopifyOrderNode {
       } | null;
       originalUnitPriceSet: MoneyBag;
       totalDiscountSet: MoneyBag;
+      discountAllocations?: Array<{ allocatedAmountSet: MoneyBag }>;
     }>;
     pageInfo?: { hasNextPage: boolean };
   };
@@ -83,6 +84,23 @@ export function orderSource(sourceName: string | null): OrderSource {
     default:
       return "other";
   }
+}
+
+/**
+ * Discount on a line. Shopify leaves totalDiscountSet at 0 when a discount
+ * code applies to the whole order (found on the live store, Oct 9 2026), but
+ * still allocates the amount to each line in discountAllocations. Use the
+ * allocations, and the larger of the two if both are present.
+ */
+export function lineDiscountCents(item: {
+  totalDiscountSet: MoneyBag;
+  discountAllocations?: Array<{ allocatedAmountSet: MoneyBag }>;
+}): number {
+  const allocated = (item.discountAllocations ?? []).reduce(
+    (sum, a) => sum + decimalToCents(a.allocatedAmountSet.shopMoney.amount),
+    0,
+  );
+  return Math.max(allocated, decimalToCents(item.totalDiscountSet.shopMoney.amount));
 }
 
 export function normalizeOrder(node: ShopifyOrderNode): {
@@ -136,7 +154,7 @@ export function normalizeOrder(node: ShopifyOrderNode): {
       refundedQuantity: refundedByLine.get(lineId) ?? 0,
       currentQuantity: item.currentQuantity,
       unitPriceCents: decimalToCents(item.originalUnitPriceSet.shopMoney.amount),
-      discountCents: decimalToCents(item.totalDiscountSet.shopMoney.amount),
+      discountCents: lineDiscountCents(item),
       currentUnitCostCents: cost === undefined || cost === null ? null : decimalToCents(cost),
     });
   }

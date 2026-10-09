@@ -185,6 +185,22 @@ describe("Attribution and payout test cases (spec)", () => {
     const results = run({}, [line({ discountCents: 1950 })]);
     expect(results[0]).toMatchObject({ qualifyingUnits: 1, outcome: "qualifying", flags: ["discount"] });
     expect(totals(results)).toMatchObject({ estimatedPayoutCents: 2500, unresolvedFlaggedLines: 1 });
+
+    // A code applied to the whole order (the usual case on the live store,
+    // e.g. #111494, WELCOME code, Oct 2 2026): Shopify leaves the line's
+    // totalDiscountSet at $0 and puts the amount in discountAllocations.
+    const { lines } = normalizeOrder(
+      shopifyOrderNode({
+        lines: [
+          { id: "1", productId: CAPE, quantity: 1, orderDiscount: "19.50" },
+          { id: "2", productId: CAPE, quantity: 1, orderDiscount: "19.50" },
+        ],
+      }),
+    );
+    expect(lines.map((l) => l.discountCents)).toEqual([1950, 1950]);
+    const wholeOrder = run({}, lines.map((l) => line({ quantity: l.quantity, discountCents: l.discountCents })));
+    expect(wholeOrder.map((r) => r.flags)).toEqual([["discount"], ["discount"]]);
+    expect(totals(wholeOrder)).toMatchObject({ qualifyingUnits: 2, estimatedPayoutCents: 5000, unresolvedFlaggedLines: 2 });
   });
 
   test("Case 13: coach product bought during the window → 0 units", () => {

@@ -74,6 +74,8 @@ export const ORDER_QUERY = `#graphql
           variant { id inventoryItem { unitCost { amount } } }
           originalUnitPriceSet { shopMoney { amount } }
           totalDiscountSet { shopMoney { amount } }
+          # Order-wide discount codes show up here, not in totalDiscountSet.
+          discountAllocations { allocatedAmountSet { shopMoney { amount } } }
         }
         pageInfo { hasNextPage }
       }
