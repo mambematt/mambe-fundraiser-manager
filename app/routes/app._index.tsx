@@ -85,11 +85,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await flushAlerts();
       return { ok: true, message: "Test alert sent. It should appear in Sentry → Issues within a minute, and Sentry should email you." };
     }
+    const running = await db.jobRun.findFirst({
+      where: { name: "nightly", status: "running", startedAt: { gte: new Date(Date.now() - 30 * 60 * 1000) } },
+    });
+    if (running) return { ok: true, message: "A nightly re-check is already running. Refresh in a minute to see the result." };
     const shopify = await shopifyClientForShop(session.shop);
-    const result = await runNightlyRecheck(db, shopify);
-    if (result.status === "failed") return { ok: false, message: `Nightly re-check failed: ${result.error}` };
-    const d = result.details as { ordersChecked: number; ordersSaved: number };
-    return { ok: true, message: `Nightly re-check done: ${d.ordersChecked} orders checked, ${d.ordersSaved} with linked products saved.` };
+    // On the live store this can take a few minutes, so it runs after the reply.
+    // Failures are recorded on the run and alerted.
+    void runNightlyRecheck(db, shopify).catch(() => {});
+    return { ok: true, message: "Nightly re-check started. Refresh in a minute or two; Sync health shows the result." };
   });
 };
 
@@ -238,7 +242,9 @@ export default function Index() {
         </s-paragraph>
         <s-paragraph>
           Nightly re-check: last success {pacific(data.jobs.nightlyOkAt)}
-          {data.jobs.nightly && data.jobs.nightly.status !== "succeeded"
+          {data.jobs.nightly && data.jobs.nightly.status === "running"
+            ? ` · running since ${pacific(data.jobs.nightly.at)}`
+            : data.jobs.nightly && data.jobs.nightly.status !== "succeeded"
             ? ` · last attempt ${data.jobs.nightly.status} ${pacific(data.jobs.nightly.at)}${data.jobs.nightly.error ? `: ${data.jobs.nightly.error}` : ""}`
             : ""}
         </s-paragraph>

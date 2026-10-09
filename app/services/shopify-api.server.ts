@@ -22,13 +22,21 @@ export interface ShopifyProductInfo {
   tags: string[];
 }
 
+export interface UpdatedOrder {
+  id: string;
+  productIds: string[] | null;
+}
+
 export interface ShopifyClient {
   fetchOrder(shopifyOrderId: string): Promise<ShopifyOrderNode | null>;
   fetchProduct(shopifyProductId: string): Promise<ShopifyProductInfo | null>;
   /** Every order ID containing the product, oldest first. */
   listOrderIdsForProduct(shopifyProductId: string): Promise<string[]>;
-  /** Every order ID updated at or after `since`. */
-  listOrderIdsUpdatedSince(since: Date): Promise<string[]>;
+  /**
+   * Every order updated at or after `since`, with the product IDs on it
+   * (null if the order has too many lines to list cheaply).
+   */
+  listOrdersUpdatedSince(since: Date): Promise<UpdatedOrder[]>;
   /** Products whose title matches the words typed. */
   searchProducts(text: string): Promise<ShopifyProductInfo[]>;
 }
@@ -111,10 +119,18 @@ export const PRODUCT_SEARCH_QUERY = `#graphql
     }
   }`;
 
-export const ORDER_IDS_UPDATED_SINCE_QUERY = `#graphql
+// A cheap first look: each order's product IDs, so the nightly re-check only
+// fully re-reads orders that contain a linked product.
+export const ORDERS_UPDATED_SINCE_QUERY = `#graphql
   query FundraiserOrdersUpdatedSince($query: String!, $after: String) {
-    orders(first: 100, after: $after, query: $query, sortKey: UPDATED_AT) {
-      nodes { id }
+    orders(first: 25, after: $after, query: $query, sortKey: UPDATED_AT) {
+      nodes {
+        id
+        lineItems(first: 25) {
+          nodes { product { id } }
+          pageInfo { hasNextPage }
+        }
+      }
       pageInfo { hasNextPage endCursor }
     }
   }`;
@@ -188,18 +204,26 @@ export function createShopifyClient(run: GraphqlRunner): ShopifyClient {
       return ids;
     },
 
-    async listOrderIdsUpdatedSince(since) {
-      const ids: string[] = [];
+    async listOrdersUpdatedSince(since) {
+      const orders: UpdatedOrder[] = [];
       let after: string | null = null;
       do {
-        const data = await run(ORDER_IDS_UPDATED_SINCE_QUERY, {
+        const data = await run(ORDERS_UPDATED_SINCE_QUERY, {
           query: `updated_at:>='${since.toISOString()}'`,
           after,
         });
-        for (const node of data.orders.nodes) ids.push(numericId(node.id));
+        for (const node of data.orders.nodes) {
+          const lines = node.lineItems;
+          orders.push({
+            id: numericId(node.id),
+            productIds: lines.pageInfo.hasNextPage
+              ? null
+              : lines.nodes.filter((l: { product: { id: string } | null }) => l.product).map((l: { product: { id: string } }) => numericId(l.product.id)),
+          });
+        }
         after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
       } while (after);
-      return ids;
+      return orders;
     },
 
     async searchProducts(text) {

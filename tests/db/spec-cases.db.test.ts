@@ -18,7 +18,7 @@ function fakeShopify(state: { order: ShopifyOrderNode | null }): ShopifyClient {
     fetchOrder: async () => state.order,
     fetchProduct: async () => null,
     listOrderIdsForProduct: async () => [],
-    listOrderIdsUpdatedSince: async () => (state.order ? [state.order.id.split("/").pop()!] : []),
+    listOrdersUpdatedSince: async () => (state.order ? [{ id: state.order.id.split("/").pop()!, productIds: null }] : []),
     searchProducts: async () => [],
   };
 }

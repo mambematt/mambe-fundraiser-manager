@@ -127,7 +127,7 @@ describe("products and backfill", () => {
           ? { shopifyProductId: "4444", handle: "untagged", title: "Untagged Cape", status: "ACTIVE", tags: [] }
           : null,
     listOrderIdsForProduct: async () => Object.keys(orders),
-    listOrderIdsUpdatedSince: async () => Object.keys(orders),
+    listOrdersUpdatedSince: async () => Object.keys(orders).map((id) => ({ id, productIds: [CAPE] })),
     searchProducts: async () => [],
   };
 

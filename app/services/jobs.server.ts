@@ -89,7 +89,18 @@ export async function runNightlyRecheck(
     });
     const since = new Date((lastOk?.startedAt ?? now).getTime() - NIGHTLY_OVERLAP_MS);
 
-    const orderIds = await shopify.listOrderIdsUpdatedSince(since);
+    const updated = await shopify.listOrdersUpdatedSince(since);
+    // Re-read only orders that touch a linked product, or that we already
+    // keep (a linked product may have been removed from an order by an edit).
+    const [linked, kept] = await Promise.all([
+      db.product.findMany({ select: { shopifyProductId: true } }),
+      db.shopifyOrder.findMany({ where: { shopifyOrderId: { in: updated.map((o) => o.id) } }, select: { shopifyOrderId: true } }),
+    ]);
+    const linkedIds = new Set(linked.map((p) => p.shopifyProductId));
+    const keptIds = new Set(kept.map((o) => o.shopifyOrderId));
+    const orderIds = updated
+      .filter((o) => keptIds.has(o.id) || o.productIds === null || o.productIds.some((p) => linkedIds.has(p)))
+      .map((o) => o.id);
     let saved = 0;
     const failures: Array<{ shopifyOrderId: string; error: string }> = [];
     for (const id of orderIds) {
@@ -111,6 +122,7 @@ export async function runNightlyRecheck(
 
     const details = {
       since: since.toISOString(),
+      ordersUpdated: updated.length,
       ordersChecked: orderIds.length,
       ordersSaved: saved,
       failures,

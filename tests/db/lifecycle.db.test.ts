@@ -204,9 +204,9 @@ describe("Attribution and payout test cases (spec), through the lifecycle servic
       fetchOrder: async (id) => (id === "777" ? missed : null),
       fetchProduct: async () => null,
       listOrderIdsForProduct: async () => [],
-      listOrderIdsUpdatedSince: async (since) => {
+      listOrdersUpdatedSince: async (since) => {
         askedSince = since;
-        return ["777"];
+        return [{ id: "777", productIds: [CAPE] }];
       },
       searchProducts: async () => [],
     };
@@ -234,7 +234,7 @@ describe("nightly health check and failures", () => {
     fetchOrder: async () => null,
     fetchProduct: async () => null,
     listOrderIdsForProduct: async () => [],
-    listOrderIdsUpdatedSince: async () => [],
+    listOrdersUpdatedSince: async () => [],
     searchProducts: async () => [],
   };
 
@@ -255,8 +255,32 @@ describe("nightly health check and failures", () => {
     expect((await runNightlyRecheck(db, quietShopify, { now })).details?.webhookSilence).toBe(false);
   });
 
+  test("only orders with a linked product (or already kept, or too long to list) are re-read", async () => {
+    await seed();
+    const kept = shopifyOrderNode({ id: "1", processedAt: pt("2026-10-05T10:00:00"), lines: [{ id: "10", productId: CAPE, quantity: 1 }] });
+    const parsed = normalizeOrder(kept);
+    await saveOrder(db, parsed.order, parsed.lines);
+    const fetched: string[] = [];
+    const shopify: ShopifyClient = {
+      ...quietShopify,
+      fetchOrder: async (id) => {
+        fetched.push(id);
+        return id === "1" ? kept : id === "2" ? shopifyOrderNode({ id: "2", lines: [{ id: "20", productId: CAPE, quantity: 1 }] }) : null;
+      },
+      listOrdersUpdatedSince: async () => [
+        { id: "1", productIds: ["999"] }, // already kept (its cape was edited out): re-read
+        { id: "2", productIds: ["999", CAPE] }, // has the cape
+        { id: "3", productIds: ["999"] }, // unrelated: skipped
+        { id: "4", productIds: null }, // too many lines to list: re-read to be safe
+      ],
+    };
+    const result = await runNightlyRecheck(db, shopify, { now: new Date("2026-10-12T10:00:00Z") });
+    expect(fetched.sort()).toEqual(["1", "2", "4"]);
+    expect(result.details).toMatchObject({ ordersUpdated: 4, ordersChecked: 3 });
+  });
+
   test("a Shopify failure marks the run failed and keeps the last successful time", async () => {
-    const broken: ShopifyClient = { ...quietShopify, listOrderIdsUpdatedSince: async () => { throw new Error("Shopify is down"); } };
+    const broken: ShopifyClient = { ...quietShopify, listOrdersUpdatedSince: async () => { throw new Error("Shopify is down"); } };
     const result = await runNightlyRecheck(db, broken, { now: new Date("2026-10-12T10:00:00Z") });
     expect(result).toMatchObject({ status: "failed", error: "Shopify is down" });
     expect(await db.jobRun.count({ where: { name: "nightly", status: "succeeded" } })).toBe(0);
