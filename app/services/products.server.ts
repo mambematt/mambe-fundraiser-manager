@@ -171,10 +171,14 @@ export async function lifetimeTotalsForProduct(
 ): Promise<ProductLifetimeTotals> {
   const lines = await db.orderLineItem.findMany({
     where: { shopifyProductId },
-    include: { order: { select: { cancelledAt: true, isTest: true } } },
+    include: { order: { select: { cancelledAt: true, isTest: true, processedAt: true } } },
   });
   return productLifetimeTotals(
     lines.map((l) => ({
+      orderId: l.orderId,
+      processedAt: l.order.processedAt,
+      unitPriceCents: l.unitPriceCents,
+      discountCents: l.discountCents,
       quantity: l.quantity,
       refundedQuantity: l.refundedQuantity,
       currentQuantity: l.currentQuantity,

@@ -147,11 +147,17 @@ describe("products and backfill", () => {
     const summary = await backfillProduct(db, shopify, CAPE, "test");
     expect(summary).toMatchObject({ ordersFound: 3, ordersSaved: 3, failures: [] });
     expect(summary.totals).toEqual({
+      orders: 3,
+      ordersOlderThan60Days: expect.any(Number), // depends on today; checked with a fixed date in tests/lib
       orderedUnits: 4,
       refundedOrCancelledUnits: 1,
       netUnits: 3,
       inWindowUnits: 1,
       outsideWindowUnits: 2,
+      grossSalesCents: 4 * 19500, // all ordered units at line price, cancelled order included
+      discountsCents: 0,
+      inWindowRevenueCents: 19500,
+      outsideWindowRevenueCents: 2 * 19500,
     });
     const lines = await db.orderLineItem.findMany({ orderBy: { id: "asc" } });
     expect(lines.every((l) => l.costApproximate)).toBe(true);

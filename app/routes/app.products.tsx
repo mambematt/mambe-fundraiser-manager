@@ -6,7 +6,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { ResultBanner } from "../components/ResultBanner";
-import { pacific } from "../lib/format";
+import { dollars, pacific } from "../lib/format";
 import { attempt, formInt, formText } from "../services/actions.server";
 import { alertError } from "../services/alerts.server";
 import {
@@ -185,10 +185,17 @@ export default function Products() {
                     {p.tagged ? <s-badge tone="success">fundraiser</s-badge> : <s-badge tone="warning">Missing tag</s-badge>}
                     <s-badge>{p.status.toLowerCase()}</s-badge>
                   </s-stack>
+                  <s-text color="subdued">Shopify ID {p.shopifyProductId} · Backfill: {p.backfill}</s-text>
+                  <s-text>
+                    <s-text type="strong">Compare with Shopify Analytics (all time, test orders excluded):</s-text>{" "}
+                    {p.totals.orderedUnits} items ordered · {p.totals.netUnits} net items sold ·{" "}
+                    {dollars(p.totals.grossSalesCents)} gross sales · {dollars(p.totals.discountsCents)} discounts
+                  </s-text>
                   <s-text color="subdued">
-                    Shopify ID {p.shopifyProductId} · Ordered {p.totals.orderedUnits} · Refunded/cancelled{" "}
-                    {p.totals.refundedOrCancelledUnits} · Net {p.totals.netUnits} · In window {p.totals.inWindowUnits} ·
-                    Outside window {p.totals.outsideWindowUnits} · Backfill: {p.backfill}
+                    {p.totals.orders} orders ({p.totals.ordersOlderThan60Days} older than 60 days) ·{" "}
+                    {p.totals.refundedOrCancelledUnits} units refunded/cancelled · In fundraiser windows{" "}
+                    {p.totals.inWindowUnits} units, {dollars(p.totals.inWindowRevenueCents)} · Outside windows{" "}
+                    {p.totals.outsideWindowUnits} units, {dollars(p.totals.outsideWindowRevenueCents)}
                   </s-text>
                   <Form method="post">
                     <input type="hidden" name="intent" value="edit" />

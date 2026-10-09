@@ -270,9 +270,13 @@ export function fundraiserTotals(
 }
 
 export interface StoredLineForLifetime {
+  orderId: number;
+  processedAt: Date;
   quantity: number;
   refundedQuantity: number;
   currentQuantity: number;
+  unitPriceCents: number;
+  discountCents: number;
   outcome: string;
   qualifyingUnits: number;
   orderCancelled: boolean;
@@ -280,7 +284,11 @@ export interface StoredLineForLifetime {
 }
 
 export interface ProductLifetimeTotals {
-  /** Units ordered, before refunds (test orders left out). */
+  /** Orders containing the product (test orders left out). */
+  orders: number;
+  /** Of those, orders placed more than 60 days ago (proves full history loaded). */
+  ordersOlderThan60Days: number;
+  /** Units ordered, before refunds. Compare with Shopify Analytics "items ordered". */
   orderedUnits: number;
   /** Units refunded, removed or on cancelled orders. */
   refundedOrCancelledUnits: number;
@@ -290,25 +298,55 @@ export interface ProductLifetimeTotals {
   inWindowUnits: number;
   /** Net units sold outside any fundraiser window (evergreen). */
   outsideWindowUnits: number;
+  /** Line price × units ordered, before discounts and returns. Compare with Shopify Analytics "gross sales". */
+  grossSalesCents: number;
+  /** Discounts on these lines. */
+  discountsCents: number;
+  /** Line price × qualifying units. */
+  inWindowRevenueCents: number;
+  /** Line price × net units sold outside any window. */
+  outsideWindowRevenueCents: number;
 }
 
-/** Lifetime unit totals for one product from its stored lines. */
-export function productLifetimeTotals(lines: StoredLineForLifetime[]): ProductLifetimeTotals {
+const SIXTY_DAYS_MS = 60 * 24 * 3600 * 1000;
+
+/** Lifetime unit and revenue totals for one product from its stored lines. */
+export function productLifetimeTotals(lines: StoredLineForLifetime[], now: Date = new Date()): ProductLifetimeTotals {
   const totals: ProductLifetimeTotals = {
+    orders: 0,
+    ordersOlderThan60Days: 0,
     orderedUnits: 0,
     refundedOrCancelledUnits: 0,
     netUnits: 0,
     inWindowUnits: 0,
     outsideWindowUnits: 0,
+    grossSalesCents: 0,
+    discountsCents: 0,
+    inWindowRevenueCents: 0,
+    outsideWindowRevenueCents: 0,
   };
+  const orders = new Set<number>();
+  const oldOrders = new Set<number>();
   for (const line of lines) {
     if (line.orderIsTest) continue;
+    orders.add(line.orderId);
+    if (now.getTime() - line.processedAt.getTime() > SIXTY_DAYS_MS) oldOrders.add(line.orderId);
     const net = line.orderCancelled ? 0 : netUnits(line);
     totals.orderedUnits += line.quantity;
     totals.refundedOrCancelledUnits += line.quantity - net;
     totals.netUnits += net;
-    if (line.outcome === "qualifying") totals.inWindowUnits += line.qualifyingUnits;
-    if (line.outcome === "non_fundraiser") totals.outsideWindowUnits += net;
+    totals.grossSalesCents += line.quantity * line.unitPriceCents;
+    totals.discountsCents += line.discountCents;
+    if (line.outcome === "qualifying") {
+      totals.inWindowUnits += line.qualifyingUnits;
+      totals.inWindowRevenueCents += line.qualifyingUnits * line.unitPriceCents;
+    }
+    if (line.outcome === "non_fundraiser") {
+      totals.outsideWindowUnits += net;
+      totals.outsideWindowRevenueCents += net * line.unitPriceCents;
+    }
   }
+  totals.orders = orders.size;
+  totals.ordersOlderThan60Days = oldOrders.size;
   return totals;
 }

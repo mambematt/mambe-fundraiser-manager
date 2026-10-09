@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { computeWindow, effectiveWindow, windowContains } from "../../app/lib/window";
 import { decimalToCents, formatCents } from "../../app/lib/money";
-import { attributeOrder, netUnits } from "../../app/lib/attribution";
+import { attributeOrder, netUnits, productLifetimeTotals } from "../../app/lib/attribution";
 import { line, order, pt, sampleFundraiser } from "../helpers/fixtures";
 
 describe("computeWindow", () => {
@@ -114,5 +114,32 @@ describe("attribution engine details", () => {
 
   test("net units never go negative", () => {
     expect(netUnits({ quantity: 1, refundedQuantity: 2, currentQuantity: 0 })).toBe(0);
+  });
+});
+
+describe("product lifetime totals", () => {
+  const base = { refundedQuantity: 0, discountCents: 0, orderCancelled: false, orderIsTest: false, qualifyingUnits: 0, outcome: "non_fundraiser" };
+  test("counts orders older than 60 days, gross sales and discounts; leaves out test orders", () => {
+    const now = new Date("2026-10-09T12:00:00Z");
+    const totals = productLifetimeTotals(
+      [
+        { ...base, orderId: 1, processedAt: new Date("2026-08-01T12:00:00Z"), quantity: 1, currentQuantity: 1, unitPriceCents: 19500 },
+        { ...base, orderId: 1, processedAt: new Date("2026-08-01T12:00:00Z"), quantity: 1, currentQuantity: 1, unitPriceCents: 23000 },
+        { ...base, orderId: 2, processedAt: new Date("2026-08-10T12:00:01Z"), quantity: 2, currentQuantity: 2, unitPriceCents: 19500, discountCents: 1950, outcome: "qualifying", qualifyingUnits: 2 },
+        { ...base, orderId: 3, processedAt: new Date("2026-10-01T12:00:00Z"), quantity: 5, currentQuantity: 5, unitPriceCents: 19500, orderIsTest: true },
+      ],
+      now,
+    );
+    expect(totals).toMatchObject({
+      orders: 2,
+      ordersOlderThan60Days: 1, // Aug 10 12:00:01 is just inside 60 days
+      orderedUnits: 4,
+      grossSalesCents: 19500 + 23000 + 2 * 19500,
+      discountsCents: 1950,
+      inWindowUnits: 2,
+      inWindowRevenueCents: 39000,
+      outsideWindowUnits: 2,
+      outsideWindowRevenueCents: 42500,
+    });
   });
 });
