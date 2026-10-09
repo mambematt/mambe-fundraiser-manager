@@ -12,6 +12,10 @@ function sentryEnabled(): boolean {
       dsn: process.env.SENTRY_DSN,
       environment: process.env.RENDER_SERVICE_NAME ?? process.env.NODE_ENV ?? "development",
       tracesSampleRate: 0,
+      // Sentry drops an event identical to the previous one by default. A
+      // failure that repeats (e.g. two nights without webhooks) must still
+      // alert, so every alert is sent; Sentry groups them into one issue.
+      integrations: (defaults) => defaults.filter((integration) => integration.name !== "Dedupe"),
     });
     initialized = true;
   }
