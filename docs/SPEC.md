@@ -49,7 +49,7 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Audit identity | Staff are recorded by their Shopify staff name |
 | Public code | Org initials – team abbreviation – season letter + 2-digit year (F Aug–Nov, W Dec–Feb, S Mar–May, U Jun–Jul); clashes get -2, -3 |
 | Checklist rules | "Organizer info received" needs the organization's PayPal email; "Product linked" needs the product active and tagged in Shopify |
-| First live fundraiser | Runs Oct 1–31, 2026; settlement must be built and passing on staging by about Nov 7 so the draft payout is ready about Nov 10 |
+| First live fundraiser | NS-GSB-F26 (Nazareth Softball, Custom Nazareth Hooded Blanket) runs Oct 1 – Nov 15, 2026; settlement must be built and passing on staging by about Nov 22 so the draft payout is ready about Nov 25. Its payout goes to the organizer's personal PayPal as a noted exception until a club account is provided. Production was installed on mambeblankets.com in session 3, read-only |
 
 ## Architecture and stack
 
