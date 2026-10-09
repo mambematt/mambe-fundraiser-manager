@@ -36,6 +36,21 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Setup hours | Not tracked. |
 | Order Printer | Separate app, same toolchain. Nothing shared at runtime. |
 
+**Decisions made during the build** (sessions 1–2, owner-approved; these override anything below that disagrees):
+
+| Topic | Decision |
+| --- | --- |
+| Statuses | 9, not 8: Application, Setup, Scheduled, Active, Settling, Payout pending, Paid, Declined, Cancelled. Fundraisers created in admin start in Setup; Application is only for form submissions. Decline works from Application or Setup |
+| Overlap rule | Cancelled fundraisers still block overlap up to their cancellation time; declined ones never block |
+| Cancelled with sales | Stays Cancelled; its payout is tracked on the payout record and its 10-day settlement starts from the cancellation time |
+| Test orders | Shopify test orders never count on the live store (shown as "Test order (not counted)"); the staging copy counts them so dev-store testing works |
+| Bulk flag | "More than 4" uses units after refunds; review flags apply only to lines inside a fundraiser window |
+| Alerts | Sentry emails on failed webhooks, failed jobs, backfill misses, webhook silence and admin errors |
+| Audit identity | Staff are recorded by their Shopify staff name |
+| Public code | Org initials – team abbreviation – season letter + 2-digit year (F Aug–Nov, W Dec–Feb, S Mar–May, U Jun–Jul); clashes get -2, -3 |
+| Checklist rules | "Organizer info received" needs the organization's PayPal email; "Product linked" needs the product active and tagged in Shopify |
+| First live fundraiser | Runs Oct 1–31, 2026; settlement must be built and passing on staging by about Nov 7 so the draft payout is ready about Nov 10 |
+
 ## Architecture and stack
 
 The app is one Render web service with Postgres and a few cron jobs; Shopify remains the source of truth for anything the customer touches.
