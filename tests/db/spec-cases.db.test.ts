@@ -8,6 +8,7 @@ import {
   recordWebhookEvent,
 } from "../../app/services/webhooks.server";
 import { insertFundraiser, resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
+import { fakeShopify as baseShopify } from "../helpers/fake-shopify";
 import { CAPE, pt, shopifyOrderNode } from "../helpers/fixtures";
 
 const db = testDb();
@@ -15,6 +16,7 @@ const db = testDb();
 /** A fake Shopify that returns whatever order state the test sets. */
 function fakeShopify(state: { order: ShopifyOrderNode | null }): ShopifyClient {
   return {
+    ...baseShopify(),
     fetchOrder: async () => state.order,
     fetchProduct: async () => null,
     listOrderIdsForProduct: async () => [],

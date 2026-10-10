@@ -3,6 +3,7 @@
 
 import type { ShopifyOrderNode } from "../lib/shopify-order";
 import { numericId, toGid } from "../lib/shopify-ids";
+import { BANNER_KEY, BANNER_NAMESPACE } from "../lib/storefront";
 
 // GraphQL response data; shapes are checked where each query is used.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +40,49 @@ export interface ShopifyClient {
   listOrdersUpdatedSince(since: Date): Promise<UpdatedOrder[]>;
   /** Products whose title matches the words typed. */
   searchProducts(text: string): Promise<ShopifyProductInfo[]>;
+
+  // Writes (session 4). Callers check the fundraiser's Storefront switch first.
+  setProductBanner(shopifyProductId: string, value: unknown): Promise<void>;
+  clearProductBanner(shopifyProductId: string): Promise<void>;
+  createRedirect(path: string, target: string): Promise<{ id: string }>;
+  updateRedirect(id: string, target: string): Promise<void>;
+}
+
+export const REDIRECT_CREATE = `#graphql
+  mutation FundraiserRedirectCreate($urlRedirect: UrlRedirectInput!) {
+    urlRedirectCreate(urlRedirect: $urlRedirect) {
+      urlRedirect { id path target }
+      userErrors { field message code }
+    }
+  }`;
+
+export const REDIRECT_UPDATE = `#graphql
+  mutation FundraiserRedirectUpdate($id: ID!, $urlRedirect: UrlRedirectInput!) {
+    urlRedirectUpdate(id: $id, urlRedirect: $urlRedirect) {
+      urlRedirect { id path target }
+      userErrors { field message code }
+    }
+  }`;
+
+export const BANNER_SET = `#graphql
+  mutation FundraiserBannerSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      metafields { id namespace key }
+      userErrors { field message code }
+    }
+  }`;
+
+export const BANNER_CLEAR = `#graphql
+  mutation FundraiserBannerClear($metafields: [MetafieldIdentifierInput!]!) {
+    metafieldsDelete(metafields: $metafields) {
+      deletedMetafields { key namespace ownerId }
+      userErrors { field message }
+    }
+  }`;
+
+function throwOnUserErrors(what: string, result: { userErrors?: Array<{ message: string }> } | undefined) {
+  const errors = result?.userErrors ?? [];
+  if (errors.length) throw new Error(`${what}: ${errors.map((e) => e.message).join("; ")}`);
 }
 
 /** "central lacrosse" → title:central* AND title:lacrosse* */
@@ -224,6 +268,33 @@ export function createShopifyClient(run: GraphqlRunner): ShopifyClient {
         after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
       } while (after);
       return orders;
+    },
+
+    async setProductBanner(shopifyProductId, value) {
+      const data = await run(BANNER_SET, {
+        metafields: [
+          { ownerId: toGid("Product", shopifyProductId), namespace: BANNER_NAMESPACE, key: BANNER_KEY, type: "json", value: JSON.stringify(value) },
+        ],
+      });
+      throwOnUserErrors("Banner write failed", data?.metafieldsSet);
+    },
+
+    async clearProductBanner(shopifyProductId) {
+      const data = await run(BANNER_CLEAR, {
+        metafields: [{ ownerId: toGid("Product", shopifyProductId), namespace: BANNER_NAMESPACE, key: BANNER_KEY }],
+      });
+      throwOnUserErrors("Banner clear failed", data?.metafieldsDelete);
+    },
+
+    async createRedirect(path, target) {
+      const data = await run(REDIRECT_CREATE, { urlRedirect: { path, target } });
+      throwOnUserErrors(`Short link ${path} couldn't be created`, data?.urlRedirectCreate);
+      return { id: data.urlRedirectCreate.urlRedirect.id as string };
+    },
+
+    async updateRedirect(id, target) {
+      const data = await run(REDIRECT_UPDATE, { id, urlRedirect: { target } });
+      throwOnUserErrors("Short link update failed", data?.urlRedirectUpdate);
     },
 
     async searchProducts(text) {

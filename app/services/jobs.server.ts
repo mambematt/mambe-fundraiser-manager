@@ -10,6 +10,9 @@ import { alert, alertError } from "./alerts.server";
 import { autoTransitionDue } from "./fundraisers.server";
 import { syncOrderFromShopify } from "./order-sync.server";
 import type { ShopifyClient } from "./shopify-api.server";
+import { queueEmail, sendDueCommunications } from "./communications.server";
+import type { KlaviyoClient } from "./klaviyo.server";
+import { syncStorefront } from "./storefront.server";
 
 export type JobName = "clock" | "nightly";
 
@@ -56,17 +59,31 @@ async function runJob(
 
 // ------------------------------------------------------------ status clock
 
-export async function runClock(db: PrismaClient, now = new Date()): Promise<JobResult> {
+export interface ClockDeps {
+  shopify?: ShopifyClient | null;
+  klaviyo?: KlaviyoClient | null;
+}
+
+export async function runClock(db: PrismaClient, now = new Date(), deps: ClockDeps = {}): Promise<JobResult> {
   return runJob(db, "clock", now, async () => {
     // Order matters: a late run can move a fundraiser from Scheduled all the
     // way to Settling in one go.
     const started = await autoTransitionDue(db, "start", now);
     const ended = await autoTransitionDue(db, "end", now);
-    // TODO(session 4): turn the product banner on/off and send the
-    // "Fundraiser ended" event here.
+    const details: Record<string, unknown> = { started, ended };
+
+    // "Fundraiser ended" email, once, for ended fundraisers with emails on.
+    const needEnded = await db.fundraiser.findMany({
+      where: { status: "settling", emailsEnabled: true, communications: { none: { kind: "ended" } } },
+    });
+    for (const f of needEnded) await queueEmail(db, f.id, "ended", now);
+
+    // Banner on while Scheduled/Active, off after (the block also checks dates).
+    if (deps.shopify) details.storefront = await syncStorefront(db, deps.shopify);
+    if (deps.klaviyo) details.emails = await sendDueCommunications(db, deps.klaviyo, now);
     // TODO(settlement): Settling → Payout pending at end + 10 days, after a
     // successful full re-pull.
-    return { started, ended };
+    return details;
   });
 }
 

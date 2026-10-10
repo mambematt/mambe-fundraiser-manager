@@ -408,6 +408,8 @@ export async function applyDatesRateChange(
       await tx.fundraiser.update({
         where: { id },
         data: {
+          // A published banner shows the old end date/rate; the clock rewrites it.
+          ...(f.bannerState === "on" ? { bannerState: "stale" } : {}),
           startDate: dateColumn(change.startDate),
           endDate: dateColumn(change.endDate),
           windowStart: window.start,
@@ -443,6 +445,9 @@ export async function launchBlockersFor(db: PrismaClient, id: number): Promise<s
     hasDates: !!f.startDate && !!f.endDate,
     payoutRateCents: f.payoutRateCents,
     overlapping: await findOverlaps(db, f.productId, { start: f.windowStart, end: f.windowEnd }, f.id),
+    storefrontEnabled: f.storefrontEnabled,
+    shortLinkWritten: !!f.shortLinkRedirectId,
+    bannerWritten: f.bannerState === "on",
   });
 }
 

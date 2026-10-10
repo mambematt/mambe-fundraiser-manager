@@ -17,6 +17,7 @@ import { runClock, runNightlyRecheck, nightlyIsDue } from "../../app/services/jo
 import type { ShopifyClient } from "../../app/services/shopify-api.server";
 import { linkProduct } from "../../app/services/products.server";
 import { resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
+import { fakeShopify as baseShopify } from "../helpers/fake-shopify";
 import { CAPE, pt, shopifyOrderNode } from "../helpers/fixtures";
 
 const db = testDb();
@@ -201,6 +202,7 @@ describe("Attribution and payout test cases (spec), through the lifecycle servic
     });
     let askedSince: Date | null = null;
     const shopify: ShopifyClient = {
+      ...baseShopify(),
       fetchOrder: async (id) => (id === "777" ? missed : null),
       fetchProduct: async () => null,
       listOrderIdsForProduct: async () => [],
@@ -231,6 +233,7 @@ describe("Attribution and payout test cases (spec), through the lifecycle servic
 
 describe("nightly health check and failures", () => {
   const quietShopify: ShopifyClient = {
+    ...baseShopify(),
     fetchOrder: async () => null,
     fetchProduct: async () => null,
     listOrderIdsForProduct: async () => [],

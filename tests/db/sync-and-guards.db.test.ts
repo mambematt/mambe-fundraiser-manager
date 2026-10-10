@@ -6,6 +6,7 @@ import { backfillProduct, linkProduct, markProductDeleted } from "../../app/serv
 import type { ShopifyClient } from "../../app/services/shopify-api.server";
 import { writeAudit } from "../../app/services/audit.server";
 import { insertFundraiser, resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
+import { fakeShopify as baseShopify } from "../helpers/fake-shopify";
 import { CAPE, COACH, pt, shopifyOrderNode } from "../helpers/fixtures";
 
 const db = testDb();
@@ -119,6 +120,7 @@ describe("products and backfill", () => {
     "102": shopifyOrderNode({ id: "102", processedAt: pt("2026-10-06T10:00:00"), cancelledAt: pt("2026-10-06T11:00:00"), financialStatus: "REFUNDED", lines: [{ id: "1020", productId: CAPE, quantity: 1, currentQuantity: 0 }] }),
   } as const;
   const shopify: ShopifyClient = {
+    ...baseShopify(),
     fetchOrder: async (id) => orders[id as keyof typeof orders] ?? null,
     fetchProduct: async (id) =>
       id === CAPE

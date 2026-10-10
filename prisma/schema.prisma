@@ -163,14 +163,31 @@ model Fundraiser {
   launchPackageReviewedBy String?   @map("launch_package_reviewed_by")
   waitingOnOrganizerSince DateTime? @map("waiting_on_organizer_since") @db.Timestamptz(3)
 
-  shortUrl         String?   @map("short_url")
-  paypalPayeeEmail String?   @map("paypal_payee_email") // the organization's account
-  driveFolderId    String?   @map("drive_folder_id")
-  cancelledAt      DateTime? @map("cancelled_at") @db.Timestamptz(3)
-  cancelReason     String?   @map("cancel_reason")
-  notes            String?
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  shortUrl String? @map("short_url")
+
+  // Owner switches (session 4): nothing reaches the live store or an
+  // organizer inbox until the matching switch is on. Both audited.
+  storefrontEnabled Boolean @default(false) @map("storefront_enabled")
+  emailsEnabled     Boolean @default(false) @map("emails_enabled")
+
+  // Short link: a Shopify URL redirect /go/<slug> → the product.
+  shortLinkSlug       String?   @unique @map("short_link_slug")
+  shortLinkRedirectId String?   @map("short_link_redirect_id")
+  shortLinkWrittenAt  DateTime? @map("short_link_written_at") @db.Timestamptz(3)
+  // Product-page banner: the product metafield mambe_fundraiser.banner.
+  bannerTeamName      String?   @map("banner_team_name")
+  bannerState         String    @default("off") @map("banner_state") // off | on
+  bannerWrittenAt     DateTime? @map("banner_written_at") @db.Timestamptz(3)
+  // Last storefront write failure, cleared on success (shown in the work queue).
+  storefrontError     String?   @map("storefront_error")
+  storefrontErrorAt   DateTime? @map("storefront_error_at") @db.Timestamptz(3)
+  paypalPayeeEmail    String?   @map("paypal_payee_email") // the organization's account
+  driveFolderId       String?   @map("drive_folder_id")
+  cancelledAt         DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason        String?   @map("cancel_reason")
+  notes               String?
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   team           Team                  @relation(fields: [teamId], references: [id])
   product        Product               @relation(fields: [productId], references: [id])
@@ -353,15 +370,18 @@ model Asset {
 }
 
 model Communication {
-  id           Int       @id @default(autoincrement())
-  fundraiserId Int       @map("fundraiser_id")
-  kind         String // confirmation | launch | week_2 | week_3 | final | ended | paid
-  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz(3)
-  sentAt       DateTime? @map("sent_at") @db.Timestamptz(3)
-  status       String    @default("scheduled") // scheduled | sent | failed | skipped
-  attempts     Int       @default(0)
-  error        String?
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  id             Int       @id @default(autoincrement())
+  fundraiserId   Int       @map("fundraiser_id")
+  kind           String // launch | reminder | final | ended | portal_ready | paid
+  reminderNumber Int?      @map("reminder_number")
+  scheduledFor   DateTime? @map("scheduled_for") @db.Timestamptz(3)
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(3)
+  status         String    @default("scheduled") // scheduled | sent | skipped_past_due | failed | cancelled
+  attempts       Int       @default(0)
+  lastAttemptAt  DateTime? @map("last_attempt_at") @db.Timestamptz(3)
+  sentBy         String?   @map("sent_by") // "clock" or the staff member who clicked Send now
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   fundraiser Fundraiser @relation(fields: [fundraiserId], references: [id])
 
@@ -417,6 +437,29 @@ model WebhookEvent {
   @@index([status])
   @@index([receivedAt])
   @@map("webhook_events")
+}
+
+// Portal access log: when an organizer viewed which fundraiser. No IP or device.
+model PortalVisit {
+  id           Int      @id @default(autoincrement())
+  organizerId  Int      @map("organizer_id")
+  fundraiserId Int?     @map("fundraiser_id")
+  visitedAt    DateTime @default(now()) @map("visited_at") @db.Timestamptz(3)
+
+  @@index([organizerId])
+  @@index([fundraiserId])
+  @@map("portal_visits")
+}
+
+// Rate limiting for "email me a new link". Keys are hashed (email or IP), and
+// rows older than a day are deleted.
+model RateLimitEvent {
+  id        Int      @id @default(autoincrement())
+  key       String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([key, createdAt])
+  @@map("rate_limit_events")
 }
 
 model PortalLoginToken {

@@ -11,6 +11,10 @@ export interface LaunchFacts {
   payoutRateCents: number | null;
   /** Other fundraisers on the product whose windows overlap this one. */
   overlapping: Array<{ publicCode: string; startDate: string; endDate: string }>;
+  /** Storefront items switch; when on, the short link and banner must be written. */
+  storefrontEnabled?: boolean;
+  shortLinkWritten?: boolean;
+  bannerWritten?: boolean;
 }
 
 /** Reasons launch is blocked; empty means it may launch. */
@@ -29,7 +33,11 @@ export function launchBlockers(facts: LaunchFacts): string[] {
   for (const o of facts.overlapping) {
     blockers.push(`Its dates overlap ${o.publicCode} (${o.startDate} to ${o.endDate}) on the same product.`);
   }
-  // TODO(session 4): also require the short link redirect and the product
-  // banner field to be written in Shopify (spec: "Scheduled requires").
+  // Spec "Scheduled requires … short link and banner field written": only
+  // when the fundraiser's Storefront items switch is on (owner decision, session 4).
+  if (facts.storefrontEnabled) {
+    if (!facts.shortLinkWritten) blockers.push("The short link hasn't been written to Shopify yet.");
+    if (!facts.bannerWritten) blockers.push("The banner field hasn't been written to Shopify yet.");
+  }
   return blockers;
 }

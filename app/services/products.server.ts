@@ -9,6 +9,7 @@ import { syncOrderFromShopify } from "./order-sync.server";
 import { UserError } from "../lib/errors";
 import { writeAudit } from "./audit.server";
 import { alert } from "./alerts.server";
+import { repointShortLinks } from "./storefront.server";
 
 export const FUNDRAISER_TAG = "fundraiser";
 
@@ -129,8 +130,8 @@ export async function refreshProduct(
       lastSyncedAt: new Date(),
     },
   });
-  // Re-pointing the short link when the handle changes comes with short links (later step).
   if (existing.handle !== info.handle) {
+    await repointShortLinks(db, shopify, existing.id, info.handle);
     await writeAudit(db, {
       entity: "product",
       entityId: existing.id,
