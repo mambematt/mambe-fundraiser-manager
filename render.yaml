@@ -52,6 +52,16 @@ services:
       # Sentry project key (DSN). Failures are emailed by Sentry.
       - key: SENTRY_DSN
         sync: false
+      # Klaviyo (session 4). The test recipient receives every staging email
+      # instead of the organizer.
+      - key: KLAVIYO_API_KEY
+        sync: false
+      - key: KLAVIYO_ORGANIZER_LIST_ID
+        sync: false
+      - key: KLAVIYO_TEST_RECIPIENT
+        sync: false
+      - key: PORTAL_HELP_EMAIL
+        sync: false
 
   - type: cron
     name: mambe-fundraisers-staging-cron
@@ -104,6 +114,17 @@ services:
         generateValue: true
       - key: SENTRY_DSN
         sync: false
+      - key: KLAVIYO_API_KEY
+        sync: false
+      - key: KLAVIYO_ORGANIZER_LIST_ID
+        sync: false
+      - key: PORTAL_HELP_EMAIL
+        sync: false
+      # Organizer portal and emails use the custom domain.
+      - key: PORTAL_HOST
+        value: fundraise.mambeblankets.com
+      - key: STOREFRONT_URL
+        value: https://mambeblankets.com
 
   - type: cron
     name: mambe-fundraisers-cron

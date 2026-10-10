@@ -289,5 +289,5 @@ describe("Attribution and payout test cases (spec)", () => {
 
   // Case 23 (cost per item kept from time of sale) is in tests/db/spec-cases.db.test.ts.
 
-  test.todo("Case 24: organizer A opens organizer B's fundraiser, or reuses an old login link; both refused (portal, session 4)");
+  // Case 24 (portal access: other organizer's fundraiser, used or expired link) is in tests/db/session4.db.test.ts.
 });

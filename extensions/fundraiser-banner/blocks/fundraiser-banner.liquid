@@ -1,0 +1,45 @@
+{%- comment -%}
+  Mambe fundraiser banner. The app writes the product metafield
+  mambe_fundraiser.banner (JSON) while a fundraiser runs; this block shows it.
+  Belt and braces: it only shows from the start date through the end date
+  (store time), even if the field was never cleared.
+{%- endcomment -%}
+{%- assign fr = product.metafields.mambe_fundraiser.banner.value -%}
+{%- if fr and fr.end_date and fr.start_date -%}
+  {%- assign today = 'now' | date: '%Y-%m-%d' -%}
+  {%- if today >= fr.start_date and today <= fr.end_date -%}
+    {%- assign rate = fr.rate | append: '' -%}
+    {%- assign text = block.settings.message
+      | replace: '{end date}', fr.end_display
+      | replace: '{rate}', rate
+      | replace: '{team name}', fr.team_name
+    -%}
+    <div
+      class="mambe-fundraiser-banner"
+      {{ block.shopify_attributes }}
+      style="background: {{ block.settings.background }}; color: {{ block.settings.text_color }}; padding: 12px 16px; border-radius: {{ block.settings.radius }}px; margin: 12px 0; font-weight: 600; text-align: center; line-height: 1.4;"
+    >
+      {{ text | escape }}
+    </div>
+  {%- endif -%}
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Fundraiser banner",
+  "target": "section",
+  "enabled_on": { "templates": ["product"] },
+  "settings": [
+    {
+      "type": "text",
+      "id": "message",
+      "label": "Message",
+      "info": "Placeholders: {end date}, {rate}, {team name}",
+      "default": "Through {end date}, ${rate} from every purchase goes to {team name}."
+    },
+    { "type": "color", "id": "background", "label": "Background", "default": "#1f2a44" },
+    { "type": "color", "id": "text_color", "label": "Text", "default": "#ffffff" },
+    { "type": "range", "id": "radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 8 }
+  ]
+}
+{% endschema %}

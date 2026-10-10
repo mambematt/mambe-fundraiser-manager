@@ -56,7 +56,7 @@ export async function loadNumberStrip(db: PrismaClient, now = new Date()): Promi
 }
 
 export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise<QueueGroup[]> {
-  const [fundraisers, newApplications, flagged, payouts, failedWebhooks, lastNightlyOk, health] = await Promise.all([
+  const [fundraisers, newApplications, flagged, payouts, failedWebhooks, lastNightlyOk, health, failedEmails] = await Promise.all([
     db.fundraiser.findMany({ where: { status: { notIn: ["paid", "declined"] } } }),
     db.application.count({ where: { status: "new" } }),
     db.orderLineItem.findMany({
@@ -73,6 +73,7 @@ export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise
     db.webhookEvent.count({ where: { status: "failed" } }),
     db.jobRun.findFirst({ where: { name: "nightly", status: "succeeded" }, orderBy: { startedAt: "desc" } }),
     webhookHealth(db, now),
+    db.communication.groupBy({ by: ["fundraiserId"], where: { status: "failed" }, _count: true }),
   ]);
 
   const codes = new Map(fundraisers.map((f) => [f.id, f.publicCode]));
@@ -96,5 +97,9 @@ export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise
     failedWebhooks,
     lastNightlyOkAt: lastNightlyOk?.startedAt ?? null,
     webhookSilence: health.silent,
+    failedEmails: failedEmails.map((g) => ({ id: g.fundraiserId, publicCode: codes.get(g.fundraiserId) ?? `#${g.fundraiserId}`, count: g._count })),
+    storefrontErrors: fundraisers
+      .filter((f) => f.storefrontError)
+      .map((f) => ({ id: f.id, publicCode: f.publicCode, error: f.storefrontError! })),
   });
 }

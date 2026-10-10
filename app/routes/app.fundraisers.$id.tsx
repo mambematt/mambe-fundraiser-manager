@@ -32,6 +32,14 @@ import {
   type DatesRatePreview,
 } from "../services/fundraisers.server";
 import { decideLine, decisionsLockedReason } from "../services/line-decisions.server";
+import { planReminders } from "../lib/reminders";
+import { defaultBannerTeamName } from "../lib/storefront";
+import { queueEmail, sendCommunication, sendNow, setEmailsEnabled, storefrontUrl } from "../services/communications.server";
+import { createKlaviyoClient } from "../services/klaviyo.server";
+import { afterDatesChanged, approveLaunch, backToSetup, cancelFundraiser, type Effects } from "../services/lifecycle.server";
+import { issueLoginLink } from "../services/portal.server";
+import { shopifyClientForShop } from "../services/shopify-client.server";
+import { publishStorefront, setBannerTeamName, setShortLinkSlug, setStorefrontEnabled, slugFor } from "../services/storefront.server";
 import { staffName } from "../services/staff.server";
 
 const TABS = [
@@ -50,6 +58,14 @@ const OUTCOME_FOR_TAB: Record<Exclude<TabKey, "outside">, string> = {
   excluded: "excluded",
   unpaid: "not_eligible",
   test: "test_order",
+};
+
+const EMAIL_STATUS_LABELS: Record<string, string> = {
+  scheduled: "Scheduled",
+  sent: "Sent",
+  skipped_past_due: "Skipped, past due",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 const KIND_LABELS: Record<string, string> = { flyer: "Flyer", email_copy: "Email copy", social_image: "Social image", other: "Other" };
@@ -80,7 +96,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
   const lineInclude = { order: { select: { name: true, shopifyOrderId: true, processedAt: true } } } as const;
 
-  const [totals, attributed, outside, allOrganizers, history, blockers, lockedReason] = await Promise.all([
+  const [totals, attributed, outside, allOrganizers, history, blockers, lockedReason, communications] = await Promise.all([
     storedTotals(db, f),
     db.orderLineItem.findMany({ where: { attributedFundraiserId: id }, include: lineInclude, orderBy: { order: { processedAt: "desc" } } }),
     db.orderLineItem.findMany({ where: outsideWhere, include: lineInclude, orderBy: { order: { processedAt: "desc" } } }),
@@ -88,6 +104,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     db.auditLog.findMany({ where: { entity: "fundraiser", entityId: String(id) }, orderBy: { id: "desc" }, take: 100 }),
     f.status === "setup" ? launchBlockersFor(db, id) : Promise.resolve([]),
     decisionsLockedReason(db, id),
+    db.communication.findMany({ where: { fundraiserId: id }, orderBy: [{ scheduledFor: "asc" }, { id: "asc" }] }),
   ]);
 
   const row = (l: (typeof attributed)[number]) => ({
@@ -171,7 +188,32 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       by: checklist[item.key].by,
     })),
     actions: adminActionsFrom(f.status).map((t) => ({ action: t.action, label: t.label, reasonRequired: t.reasonRequired })),
-    blockers,
+    // Approve launch writes the storefront items itself, so those two don't disable the button.
+    blockers: blockers.filter((b) => !/written to Shopify yet/.test(b)),
+    storefront: {
+      enabled: f.storefrontEnabled,
+      slug: slugFor(f),
+      live: !!f.shortLinkRedirectId,
+      shortLink: f.shortLinkRedirectId ? `${storefrontUrl()}${f.shortUrl}` : null,
+      bannerState: f.bannerState,
+      bannerWrittenAt: f.bannerWrittenAt?.toISOString() ?? null,
+      bannerTeamName: f.bannerTeamName ?? defaultBannerTeamName(f.team.organization.name, f.team.name),
+      error: f.storefrontError,
+    },
+    emails: {
+      enabled: f.emailsEnabled,
+      plannedIfOn: planReminders(startDate, endDate, f.timezone).map((p) => ({ label: p.kind === "final" ? "Final 3 days" : `Reminder ${p.reminderNumber}`, at: p.scheduledFor.toISOString() })),
+      rows: communications.map((c) => ({
+        id: c.id,
+        label: c.kind === "reminder" ? `Reminder ${c.reminderNumber}` : ({ final: "Final 3 days", launch: "Launch", ended: "Ended", portal_ready: "Portal ready", paid: "Payout sent" } as Record<string, string>)[c.kind] ?? c.kind,
+        scheduledFor: c.scheduledFor?.toISOString() ?? null,
+        sentAt: c.sentAt?.toISOString() ?? null,
+        status: c.status,
+        attempts: c.attempts,
+        sentBy: c.sentBy,
+        error: c.error,
+      })),
+    },
     allOrganizers: allOrganizers.map((o) => ({ id: o.id, label: `${o.name} (${o.email})` })),
     history: history.map((h) => ({ id: String(h.id), at: h.createdAt.toISOString(), text: describeAudit(h) })),
   };
@@ -183,9 +225,55 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const id = Number(params.id);
   const form = await request.formData();
   const intent = formText(form, "intent");
+  const effects = async (): Promise<Effects> => ({
+    shopify: await shopifyClientForShop(session.shop),
+    klaviyo: process.env.KLAVIYO_API_KEY ? createKlaviyoClient() : null,
+  });
+  const klaviyoOrThrow = () => {
+    if (!process.env.KLAVIYO_API_KEY) throw new UserError("KLAVIYO_API_KEY isn't set on this service in Render yet.");
+    return createKlaviyoClient();
+  };
 
   return attempt(async (): Promise<ActionResult> => {
     switch (intent) {
+      case "storefrontSwitch": {
+        const on = formText(form, "on") === "1";
+        await setStorefrontEnabled(db, (await effects()).shopify, id, on, actor);
+        return { ok: true, message: on ? "Storefront items switched on. Publish them (or approve launch) to write them to Shopify." : "Storefront items switched off; the banner was removed. The short link stays so old flyers keep working." };
+      }
+      case "publishStorefront": {
+        await publishStorefront(db, (await effects()).shopify!, id, actor);
+        return { ok: true, message: "Short link and banner written to Shopify." };
+      }
+      case "slug": {
+        await setShortLinkSlug(db, id, formText(form, "slug"), actor);
+        return { ok: true, message: "Short link saved." };
+      }
+      case "bannerTeam": {
+        await setBannerTeamName(db, id, formText(form, "bannerTeamName"), actor);
+        return { ok: true, message: "Banner name saved. A published banner updates within 15 minutes." };
+      }
+      case "emailsSwitch": {
+        const on = formText(form, "on") === "1";
+        await setEmailsEnabled(db, id, on, actor);
+        return { ok: true, message: on ? "Organizer emails on. Reminders whose time has passed are marked skipped and will never be sent." : "Organizer emails off; unsent emails were cancelled." };
+      }
+      case "sendNow": {
+        await sendNow(db, klaviyoOrThrow(), Number(formText(form, "communicationId")), actor);
+        return { ok: true, message: "Sent to Klaviyo." };
+      }
+      case "portalReady": {
+        const f = await db.fundraiser.findUniqueOrThrow({ where: { id } });
+        if (!f.emailsEnabled) throw new UserError("Turn on Organizer emails first.");
+        const row = await queueEmail(db, id, "portal_ready");
+        const result = await sendCommunication(db, klaviyoOrThrow(), row, actor);
+        if (result !== "sent") throw new UserError("Klaviyo didn't accept it; see the Communications log.");
+        return { ok: true, message: "\"Portal ready\" email sent." };
+      }
+      case "portalLink": {
+        await issueLoginLink(db, klaviyoOrThrow(), Number(formText(form, "organizerId")));
+        return { ok: true, message: "Portal sign-in link sent (it works once, for 30 minutes)." };
+      }
       case "decide": {
         const decision = formText(form, "decision") as "include" | "exclude";
         const totals = await decideLine(db, Number(formText(form, "lineId")), decision, formText(form, "note"), actor);
@@ -218,7 +306,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
       case "transition": {
         const action = formText(form, "action") as TransitionAction;
-        const f = await transitionFundraiser(db, id, action, { reason: formText(form, "reason"), actor });
+        const reason = formText(form, "reason");
+        const f =
+          action === "approve_launch"
+            ? await approveLaunch(db, await effects(), id, actor)
+            : action === "cancel"
+              ? await cancelFundraiser(db, await effects(), id, reason, actor)
+              : action === "back_to_setup"
+                ? await backToSetup(db, id, reason, actor)
+                : await transitionFundraiser(db, id, action, { reason, actor });
         return { ok: true, message: `Now ${STATUS_LABELS[f.status as FundraiserStatus]}.` };
       }
       case "checklist": {
@@ -242,6 +338,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           return { ok: true, message: "", preview, reason: formText(form, "reason") };
         }
         const { preview, saved } = await applyDatesRateChange(db, id, change, formText(form, "reason"), actor);
+        await afterDatesChanged(db, id);
         const matches =
           saved.qualifyingUnits === preview.after.qualifyingUnits && saved.estimatedPayoutCents === preview.after.estimatedPayoutCents;
         return {
@@ -686,13 +783,150 @@ export default function FundraiserPage() {
         </Form>
       </s-section>
 
-      <s-section heading="Communications">
-        <s-paragraph>
+      <s-section heading="Storefront items (banner and short link)">
+        <s-stack gap="base">
+          <s-paragraph>
+            Switch:{" "}
+            {data.storefront.enabled ? <s-badge tone="success">On</s-badge> : <s-badge>Off: nothing is written to the store</s-badge>}
+            {" · "}Banner:{" "}
+            {data.storefront.bannerState === "on"
+              ? "on the product page"
+              : data.storefront.bannerState === "stale"
+                ? "updating within 15 minutes"
+                : "not shown"}
+            {data.storefront.bannerWrittenAt ? ` (written ${pacific(data.storefront.bannerWrittenAt)})` : ""}
+          </s-paragraph>
+          {data.storefront.error && (
+            <s-banner tone="critical">
+              <s-paragraph>Last Shopify write failed: {data.storefront.error}. The clock retries every 15 minutes.</s-paragraph>
+            </s-banner>
+          )}
+          <s-paragraph>
+            Short link:{" "}
+            {data.storefront.shortLink ? (
+              <s-link href={data.storefront.shortLink} target="_blank">{data.storefront.shortLink}</s-link>
+            ) : (
+              <s-text>/go/{data.storefront.slug} (not written yet)</s-text>
+            )}
+          </s-paragraph>
+          {!data.storefront.live && (
+            <Form method="post">
+              <input type="hidden" name="intent" value="slug" />
+              <s-stack direction="inline" gap="base" alignItems="end">
+                <s-text-field name="slug" label="Short link: mambeblankets.com/go/" defaultValue={data.storefront.slug} />
+                <s-button type="submit" disabled={busy}>Save short link</s-button>
+              </s-stack>
+            </Form>
+          )}
+          <Form method="post">
+            <input type="hidden" name="intent" value="bannerTeam" />
+            <s-stack direction="inline" gap="base" alignItems="end">
+              <s-text-field name="bannerTeamName" label="Name on the banner" defaultValue={data.storefront.bannerTeamName} />
+              <s-button type="submit" disabled={busy}>Save name</s-button>
+            </s-stack>
+          </Form>
+          <s-stack direction="inline" gap="base">
+            <Form method="post">
+              <input type="hidden" name="intent" value="storefrontSwitch" />
+              <input type="hidden" name="on" value={data.storefront.enabled ? "0" : "1"} />
+              <s-button type="submit" variant={data.storefront.enabled ? "secondary" : "primary"} disabled={busy}>
+                {data.storefront.enabled ? "Turn storefront items off" : "Turn storefront items on"}
+              </s-button>
+            </Form>
+            {data.storefront.enabled && ["scheduled", "active"].includes(f.status) && (
+              <Form method="post">
+                <input type="hidden" name="intent" value="publishStorefront" />
+                <s-button type="submit" variant="primary" disabled={busy}>Publish storefront items now</s-button>
+              </Form>
+            )}
+          </s-stack>
           <s-text color="subdued">
-            Coming in session 4: the launch email, the week 2, week 3 and final-days reminders, the &ldquo;ended&rdquo; and
-            &ldquo;paid&rdquo; emails, each with when it was scheduled, when it was sent, and any error.
+            With the switch on, Approve launch writes both. For a fundraiser already running, use Publish. The banner hides itself
+            after the end date and the clock removes it; the short link stays so old flyers still work.
           </s-text>
-        </s-paragraph>
+        </s-stack>
+      </s-section>
+
+      <s-section heading="Organizer emails">
+        <s-stack gap="base">
+          <s-paragraph>
+            Switch:{" "}
+            {data.emails.enabled ? <s-badge tone="success">On</s-badge> : <s-badge>Off: no emails are sent to organizers</s-badge>}
+          </s-paragraph>
+          <s-stack direction="inline" gap="base">
+            <Form method="post">
+              <input type="hidden" name="intent" value="emailsSwitch" />
+              <input type="hidden" name="on" value={data.emails.enabled ? "0" : "1"} />
+              <s-button type="submit" variant={data.emails.enabled ? "secondary" : "primary"} disabled={busy}>
+                {data.emails.enabled ? "Turn organizer emails off" : "Turn organizer emails on"}
+              </s-button>
+            </Form>
+            {data.emails.enabled && (
+              <Form method="post">
+                <input type="hidden" name="intent" value="portalReady" />
+                <s-button type="submit" disabled={busy}>Send the Portal ready email</s-button>
+              </Form>
+            )}
+          </s-stack>
+          {data.emails.rows.length === 0 ? (
+            <s-text color="subdued">
+              Planned when emails are on and the fundraiser is Scheduled or Active:{" "}
+              {data.emails.plannedIfOn.map((e) => `${e.label} ${pacific(e.at)}`).join(" · ")}. Any whose time has passed is
+              skipped, never sent late.
+            </s-text>
+          ) : (
+            <s-table>
+              <s-table-header-row>
+                <s-table-header>Email</s-table-header>
+                <s-table-header>Scheduled (Pacific)</s-table-header>
+                <s-table-header>Status</s-table-header>
+                <s-table-header>Sent</s-table-header>
+                <s-table-header></s-table-header>
+              </s-table-header-row>
+              <s-table-body>
+                {data.emails.rows.map((c) => (
+                  <s-table-row key={c.id}>
+                    <s-table-cell>{c.label}</s-table-cell>
+                    <s-table-cell>{pacific(c.scheduledFor)}</s-table-cell>
+                    <s-table-cell>
+                      {EMAIL_STATUS_LABELS[c.status] ?? c.status}
+                      {c.error && c.status !== "sent" ? ` · ${c.error}` : ""}
+                    </s-table-cell>
+                    <s-table-cell>{c.sentAt ? `${pacific(c.sentAt)}${c.sentBy ? ` by ${c.sentBy}` : ""}` : "—"}</s-table-cell>
+                    <s-table-cell>
+                      {data.emails.enabled && c.status !== "sent" && (
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="sendNow" />
+                          <input type="hidden" name="communicationId" value={c.id} />
+                          <s-button type="submit" variant="tertiary" disabled={busy}>Send now</s-button>
+                        </Form>
+                      )}
+                    </s-table-cell>
+                  </s-table-row>
+                ))}
+              </s-table-body>
+            </s-table>
+          )}
+        </s-stack>
+      </s-section>
+
+      <s-section heading="Organizer portal">
+        <s-stack gap="base">
+          <s-paragraph>
+            <s-link href={`/app/fundraisers/${f.id}/preview`}>Open portal as organizer (read-only preview)</s-link>
+          </s-paragraph>
+          {f.organizers.map((o) => (
+            <Form method="post" key={o.id}>
+              <input type="hidden" name="intent" value="portalLink" />
+              <input type="hidden" name="organizerId" value={o.id} />
+              <s-stack direction="inline" gap="base" alignItems="center">
+                <s-text>{o.name} · {o.email}</s-text>
+                <s-button type="submit" variant="tertiary" disabled={busy}>Send portal link</s-button>
+              </s-stack>
+            </Form>
+          ))}
+          <s-text color="subdued">Sign-in links work once, for 30 minutes, and are sent whatever the emails switch says.</s-text>
+        </s-stack>
       </s-section>
 
       <s-section heading="Payout">

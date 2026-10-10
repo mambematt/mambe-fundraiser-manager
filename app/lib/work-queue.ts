@@ -30,6 +30,10 @@ export interface QueueInput {
   failedWebhooks: number;
   lastNightlyOkAt: Date | null;
   webhookSilence: boolean;
+  /** Organizer emails that failed after retries. */
+  failedEmails?: Array<{ id: number; publicCode: string; count: number }>;
+  /** Fundraisers whose last banner/short-link write failed. */
+  storefrontErrors?: Array<{ id: number; publicCode: string; error: string }>;
 }
 
 export interface QueueItem {
@@ -141,6 +145,23 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
         : [],
     },
     input.payoutsToSend.count,
+  );
+
+  add({
+    key: "storefront",
+    label: "Storefront writes failing (banner or short link)",
+    tone: "critical",
+    items: (input.storefrontErrors ?? []).map((f) => ({ label: f.publicCode, href: link(f), detail: f.error.slice(0, 80) })),
+  });
+
+  add(
+    {
+      key: "emails",
+      label: "Organizer emails failed",
+      tone: "critical",
+      items: (input.failedEmails ?? []).map((f) => ({ label: f.publicCode, href: `${link(f)}#emails`, detail: `${f.count} email${f.count === 1 ? "" : "s"}` })),
+    },
+    (input.failedEmails ?? []).reduce((sum, f) => sum + f.count, 0),
   );
 
   const sync: QueueItem[] = [];
