@@ -101,7 +101,11 @@ export type LoginTokenResult =
 export async function redeemLoginToken(db: PrismaClient, token: string, now = new Date()): Promise<LoginTokenResult> {
   if (!token || token.length < 20) return { ok: false, reason: "unknown" };
   const row = await db.portalLoginToken.findUnique({ where: { tokenHash: hashToken(token) } });
-  if (!row) return { ok: false, reason: "unknown" };
+  if (!row) {
+    // First 4 characters only: enough to match a failed tap to an email, useless for signing in.
+    console.warn(`[portal] unrecognized login link ${token.slice(0, 4)}… (${token.length} chars)`);
+    return { ok: false, reason: "unknown" };
+  }
   // Atomic: only the first use of an unexpired token succeeds.
   const used = await db.portalLoginToken.updateMany({
     where: { id: row.id, usedAt: null, expiresAt: { gt: now } },
