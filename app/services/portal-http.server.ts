@@ -30,7 +30,10 @@ export function clearSessionCookie(): string {
 /** Double-submit CSRF token: the same value in a cookie and a hidden field. */
 export function issueCsrf(): { token: string; setCookie: string } {
   const token = newToken();
-  return { token, setCookie: cookie(CSRF_COOKIE, token, 3600, "Strict") };
+  // Lax, not Strict: organizers arrive from an email link (another site), and
+  // some phone browsers then withhold Strict cookies from the page's own
+  // Continue button. Lax still keeps the cookie off other sites' form posts.
+  return { token, setCookie: cookie(CSRF_COOKIE, token, 3600, "Lax") };
 }
 
 export function csrfOk(request: Request, form: FormData): boolean {
