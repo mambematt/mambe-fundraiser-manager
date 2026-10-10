@@ -91,17 +91,35 @@ export async function requestLoginLink(
 }
 
 /** Use a login link: single use, 30 minutes. Returns the organizer, or null. */
-export async function consumeLoginToken(db: PrismaClient, token: string, now = new Date()): Promise<number | null> {
-  if (!token || token.length < 20) return null;
-  const tokenHash = hashToken(token);
-  const row = await db.portalLoginToken.findUnique({ where: { tokenHash } });
-  if (!row) return null;
+export type LoginTokenResult =
+  | { ok: true; organizerId: number }
+  | { ok: false; reason: "unknown" }
+  | { ok: false; reason: "used"; at: Date }
+  | { ok: false; reason: "expired"; at: Date };
+
+/** Use a login link, saying why when it can't be used (shown only to whoever holds the link). */
+export async function redeemLoginToken(db: PrismaClient, token: string, now = new Date()): Promise<LoginTokenResult> {
+  if (!token || token.length < 20) return { ok: false, reason: "unknown" };
+  const row = await db.portalLoginToken.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!row) return { ok: false, reason: "unknown" };
   // Atomic: only the first use of an unexpired token succeeds.
   const used = await db.portalLoginToken.updateMany({
     where: { id: row.id, usedAt: null, expiresAt: { gt: now } },
     data: { usedAt: now },
   });
-  return used.count === 1 ? row.organizerId : null;
+  if (used.count === 1) return { ok: true, organizerId: row.organizerId };
+  const latest = await db.portalLoginToken.findUniqueOrThrow({ where: { id: row.id } });
+  if (latest.usedAt) {
+    console.warn(`[portal] login link for organizer ${row.organizerId} already used at ${latest.usedAt.toISOString()}`);
+    return { ok: false, reason: "used", at: latest.usedAt };
+  }
+  return { ok: false, reason: "expired", at: latest.expiresAt };
+}
+
+/** Use a login link: single use, 30 minutes. Returns the organizer, or null. */
+export async function consumeLoginToken(db: PrismaClient, token: string, now = new Date()): Promise<number | null> {
+  const result = await redeemLoginToken(db, token, now);
+  return result.ok ? result.organizerId : null;
 }
 
 // --------------------------------------------------------------- sessions

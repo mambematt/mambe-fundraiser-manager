@@ -11,8 +11,10 @@ export const meta: MetaFunction = () => [{ title: "Sign in · Mambe Fundraisers"
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { token, setCookie } = issueCsrf();
-  const reason = new URL(request.url).searchParams.get("reason");
-  return Response.json({ csrf: token, reason }, { headers: { "Set-Cookie": setCookie } });
+  const params = new URL(request.url).searchParams;
+  const reason = params.get("reason");
+  const why = params.get("why")?.slice(0, 200) ?? null;
+  return Response.json({ csrf: token, reason, why }, { headers: { "Set-Cookie": setCookie } });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -29,13 +31,18 @@ const REASONS: Record<string, string> = {
 };
 
 export default function PortalLogin() {
-  const { csrf, reason } = useLoaderData<{ csrf: string; reason: string | null }>();
+  const { csrf, reason, why } = useLoaderData<{ csrf: string; reason: string | null; why: string | null }>();
   const result = useActionData<typeof action>();
   return (
     <PortalLayout>
       <div className="card">
         <h1>Sign in</h1>
-        {reason && REASONS[reason] && !result && <p className="note">{REASONS[reason]}</p>}
+        {reason && REASONS[reason] && !result && (
+          <p className="note">
+            {why ? `${why} ` : ""}
+            {REASONS[reason]}
+          </p>
+        )}
         {result ? (
           <p>{result.message}</p>
         ) : (

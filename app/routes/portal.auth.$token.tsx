@@ -2,9 +2,11 @@
 // link itself does nothing: the organizer presses "Continue", which uses it.
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { Form, redirect, useActionData, useLoaderData } from "react-router";
+import { DateTime } from "luxon";
 import db from "../db.server";
 import { PortalLayout } from "../components/PortalLayout";
-import { consumeLoginToken, createSession } from "../services/portal.server";
+import { DEFAULT_TIMEZONE } from "../lib/window";
+import { createSession, redeemLoginToken } from "../services/portal.server";
 import { csrfOk, issueCsrf, sessionCookie } from "../services/portal-http.server";
 
 export const meta: MetaFunction = () => [{ title: "Sign in · Mambe Fundraisers" }, { name: "robots", content: "noindex" }];
@@ -14,24 +16,33 @@ export const loader = async () => {
   return Response.json({ csrf: token }, { headers: { "Set-Cookie": setCookie, "Referrer-Policy": "no-referrer" } });
 };
 
+const time = (d: Date) => DateTime.fromJSDate(d).setZone(DEFAULT_TIMEZONE).toFormat("LLL d 'at' h:mm a ZZZZ");
+
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const form = await request.formData();
   if (!csrfOk(request, form)) {
-    // The link hasn't been used: show the page again with a fresh check.
-    const { token, setCookie } = issueCsrf();
+    // The link hasn't been used. The page reloads its check value; press again.
     console.warn("[portal] sign-in Continue failed the CSRF check; link left unused");
-    return Response.json({ retry: true, csrf: token }, { headers: { "Set-Cookie": setCookie } });
+    return { retry: true };
   }
-  const organizerId = await consumeLoginToken(db, params.token ?? "");
-  if (!organizerId) return redirect("/portal/login?reason=expired");
-  const raw = await createSession(db, organizerId);
+  const result = await redeemLoginToken(db, params.token ?? "");
+  if (!result.ok) {
+    const why =
+      result.reason === "used"
+        ? `This link was already used, ${time(result.at)}.`
+        : result.reason === "expired"
+          ? `This link expired ${time(result.at)}.`
+          : "This link wasn't recognized.";
+    return redirect(`/portal/login?reason=expired&why=${encodeURIComponent(why)}`);
+  }
+  const raw = await createSession(db, result.organizerId);
   return redirect("/portal", { headers: { "Set-Cookie": sessionCookie(raw) } });
 };
 
 export default function PortalAuth() {
-  const loaded = useLoaderData<{ csrf: string }>();
-  const retry = useActionData<{ retry: boolean; csrf: string }>();
-  const csrf = retry?.csrf ?? loaded.csrf;
+  // Always the newest check value: the page reloads it after each try.
+  const { csrf } = useLoaderData<{ csrf: string }>();
+  const retry = useActionData<{ retry: boolean }>();
   return (
     <PortalLayout>
       <div className="card">
