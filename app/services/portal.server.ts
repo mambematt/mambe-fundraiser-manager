@@ -25,8 +25,12 @@ const HOUR = 3600 * 1000;
 
 async function overLimit(db: PrismaClient, key: string, limit: number, now: Date): Promise<boolean> {
   const recent = await db.rateLimitEvent.count({ where: { key, createdAt: { gte: new Date(now.getTime() - HOUR) } } });
-  await db.rateLimitEvent.create({ data: { key, createdAt: now } });
   return recent >= limit;
+}
+
+/** Only requests that go through count, so retrying while limited doesn't extend the wait. */
+async function countRequest(db: PrismaClient, keys: string[], now: Date) {
+  await db.rateLimitEvent.createMany({ data: keys.map((key) => ({ key, createdAt: now })) });
 }
 
 // ----------------------------------------------------------- login links
@@ -65,9 +69,15 @@ export async function requestLoginLink(
 ): Promise<string> {
   const clean = email.trim().toLowerCase();
   await db.rateLimitEvent.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 24 * HOUR) } } });
-  const emailLimited = clean ? await overLimit(db, hashKey("email", clean), RATE_LIMIT_PER_EMAIL_PER_HOUR, now) : true;
-  const ipLimited = await overLimit(db, hashKey("ip", ip || "unknown"), RATE_LIMIT_PER_IP_PER_HOUR, now);
-  if (emailLimited || ipLimited) return NEUTRAL_REPLY;
+  const emailKey = hashKey("email", clean);
+  const ipKey = hashKey("ip", ip || "unknown");
+  const emailLimited = clean ? await overLimit(db, emailKey, RATE_LIMIT_PER_EMAIL_PER_HOUR, now) : true;
+  const ipLimited = await overLimit(db, ipKey, RATE_LIMIT_PER_IP_PER_HOUR, now);
+  if (emailLimited || ipLimited) {
+    console.warn("[portal] login link request rate-limited");
+    return NEUTRAL_REPLY;
+  }
+  await countRequest(db, [emailKey, ipKey], now);
 
   const organizer = await db.organizer.findUnique({ where: { email: clean } });
   if (organizer) {

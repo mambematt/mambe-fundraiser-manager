@@ -113,6 +113,19 @@ describe("login links", () => {
     expect((await db.rateLimitEvent.findMany()).every((r) => !r.key.includes("@") && !r.key.includes("9.9.9.9"))).toBe(true);
   });
 
+  test("retrying while limited doesn't extend the wait", async () => {
+    await seed();
+    const k = fakeKlaviyo();
+    const t0 = pt("2026-10-09T10:00:00");
+    const at = (minutes: number) => new Date(t0.getTime() + minutes * 60_000);
+    for (const m of [0, 1, 2]) await requestLoginLink(db, k.client, "trissy@example.org", `10.0.0.${m}`, at(m));
+    expect(k.events).toHaveLength(3);
+    for (const m of [5, 20, 40, 59]) await requestLoginLink(db, k.client, "trissy@example.org", "10.0.1.1", at(m)); // limited
+    expect(k.events).toHaveLength(3);
+    await requestLoginLink(db, k.client, "trissy@example.org", "10.0.1.1", at(61)); // an hour after the first: works again
+    expect(k.events).toHaveLength(4);
+  });
+
   test("sessions last 45 days; sign out everywhere ends them", async () => {
     const { organizer } = await seed();
     const now = pt("2026-10-09T10:00:00");
