@@ -36,7 +36,7 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Setup hours | Not tracked. |
 | Order Printer | Separate app, same toolchain. Nothing shared at runtime. |
 
-**Decisions made during the build** (sessions 1–2, owner-approved; these override anything below that disagrees):
+**Decisions made during the build** (sessions 1–4, owner-approved; these override anything below that disagrees):
 
 | Topic | Decision |
 | --- | --- |
@@ -50,6 +50,17 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Public code | Org initials – team abbreviation – season letter + 2-digit year (F Aug–Nov, W Dec–Feb, S Mar–May, U Jun–Jul); clashes get -2, -3 |
 | Checklist rules | "Organizer info received" needs the organization's PayPal email; "Product linked" needs the product active and tagged in Shopify |
 | First live fundraiser | NS-GSB-F26 (Nazareth Softball, Custom Nazareth Hooded Blanket) runs Oct 1 – Nov 15, 2026; settlement must be built and passing on staging by about Nov 22 so the draft payout is ready about Nov 25. Its payout goes to the organizer's personal PayPal as a noted exception until a club account is provided. Production was installed on mambeblankets.com in session 3, read-only |
+
+| Topic (session 4) | Decision |
+| --- | --- |
+| Safety switches | Each fundraiser has "Storefront items" (banner + short link) and "Organizer emails" switches, off by default and audited; login-link emails ignore the emails switch |
+| Reminder schedule | Day 7, day 14, then every 14 days, plus "final 3 days"; a regular reminder within 5 days of the final one is skipped; 9:00 AM Pacific; reminders more than 2 hours late are skipped, never sent late |
+| Recipients | Organizer emails go to every organizer on the fundraiser |
+| Already-running fundraisers | Get a "Portal ready" email instead of "Launched" |
+| Banner | Theme app extension: app block where supported, app embed + placeholder div on EComposer templates; hides itself after the end date; default text "Through {end date}, ${rate} from every purchase goes to {team name}." |
+| Short link | /go/\<slug> Shopify redirect, kept after the fundraiser ends and re-pointed on handle changes; turning Storefront items off removes the banner but keeps the link |
+| Portal | fundraise.mambeblankets.com/portal; login link opens a Continue page so email scanners can't use it up; counts only, never order or customer details |
+| Welcome-code leak | Klaviyo welcome popup disabled for now because its "Amount off order" coupon can't be limited to a collection; existing codes may still hit fundraiser products and are caught by the discount flag |
 
 ## Architecture and stack
 
