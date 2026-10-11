@@ -32,6 +32,20 @@ import {
   type DatesRatePreview,
 } from "../services/fundraisers.server";
 import { decideLine, decisionsLockedReason } from "../services/line-decisions.server";
+import { PayoutSection } from "../components/PayoutSection";
+import { decimalToCents } from "../lib/money";
+import { loadPayoutView } from "../services/payout-view.server";
+import { crosscheckData } from "../services/crosscheck.server";
+import {
+  acknowledgePayoutChange,
+  addAdjustment,
+  approvePayout,
+  confirmIndividualPayee,
+  dryRunSettlement,
+  recordCrossCheck,
+  recordPayment,
+  reopenPayout,
+} from "../services/settlement.server";
 import { planReminders } from "../lib/reminders";
 import { defaultBannerTeamName } from "../lib/storefront";
 import { queueEmail, sendCommunication, sendNow, setEmailsEnabled, storefrontUrl } from "../services/communications.server";
@@ -216,6 +230,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
     allOrganizers: allOrganizers.map((o) => ({ id: o.id, label: `${o.name} (${o.email})` })),
     history: history.map((h) => ({ id: String(h.id), at: h.createdAt.toISOString(), text: describeAudit(h) })),
+    payoutView: await loadPayoutView(
+      db,
+      id,
+      (await db.payout.findUnique({ where: { fundraiserId: id } }))?.status === "draft"
+        ? await (await shopifyClientForShop(session.shop)).fetchShopTimezone().catch(() => "America/Los_Angeles")
+        : null,
+    ),
   };
 };
 
@@ -273,6 +294,59 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       case "portalLink": {
         await issueLoginLink(db, klaviyoOrThrow(), Number(formText(form, "organizerId")));
         return { ok: true, message: "Portal sign-in link sent (it works once, for 30 minutes)." };
+      }
+      case "dryRun": {
+        const dryRun = await dryRunSettlement(db, (await effects()).shopify!, id);
+        return { ok: true, message: "Dry run done; see the Payout section.", dryRun };
+      }
+      case "adjust": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        const raw = formText(form, "amount").replace(/[$,\s]/g, "");
+        const cents = /^-?\d+(\.\d{1,2})?$/.test(raw) ? decimalToCents(raw) : null;
+        await addAdjustment(db, payout.id, { amountCents: cents, reason: formText(form, "reason"), effectiveDate: formText(form, "date"), adminNote: formText(form, "note") }, actor);
+        return { ok: true, message: "Adjustment added." };
+      }
+      case "crosscheck": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        const raw = formText(form, "shopifyUnits");
+        await recordCrossCheck(db, payout.id, /^\d+$/.test(raw) ? Number(raw) : null, formText(form, "note"), actor);
+        return { ok: true, message: "Cross-check saved." };
+      }
+      case "crosscheckCsv": {
+        const tz = await (await shopifyClientForShop(session.shop)).fetchShopTimezone().catch(() => "America/Los_Angeles");
+        return { ok: true, message: "", csv: (await crosscheckData(db, id, tz)).csv };
+      }
+      case "confirmPayee": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        await confirmIndividualPayee(db, payout.id, formText(form, "note"), actor);
+        return { ok: true, message: "Individual payee confirmed." };
+      }
+      case "approve": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        const s = await approvePayout(db, payout.id, actor);
+        return { ok: true, message: `Approved and frozen: ${s.units} units, ${dollars(s.finalCents)}. It's now on Ready to pay.` };
+      }
+      case "reopen": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        await reopenPayout(db, payout.id, formText(form, "reason"), actor);
+        return { ok: true, message: "Reopened as a draft; lines unlocked." };
+      }
+      case "pay": {
+        const payout = await db.payout.findUniqueOrThrow({ where: { fundraiserId: id } });
+        const raw = formText(form, "amount").replace(/[$,\s]/g, "");
+        const cents = /^\d+(\.\d{1,2})?$/.test(raw) ? decimalToCents(raw) : null;
+        await recordPayment(
+          db,
+          process.env.KLAVIYO_API_KEY ? createKlaviyoClient() : null,
+          payout.id,
+          { paidOn: formText(form, "paidOn"), method: "PayPal", reference: formText(form, "reference"), amountCents: cents, note: formText(form, "note") },
+          actor,
+        );
+        return { ok: true, message: "Payment recorded. The fundraiser is Paid." };
+      }
+      case "ackChange": {
+        await acknowledgePayoutChange(db, Number(formText(form, "changeId")), actor);
+        return { ok: true, message: "Marked as seen." };
       }
       case "decide": {
         const decision = formText(form, "decision") as "include" | "exclude";
@@ -929,14 +1003,12 @@ export default function FundraiserPage() {
         </s-stack>
       </s-section>
 
-      <s-section heading="Payout">
-        <s-paragraph>
-          <s-text color="subdued">
-            Coming with settlement: 10 days after the end date, a full re-check against Shopify, then the draft payout (units ×
-            rate), adjustments, approval, and the PayPal payment record.
-          </s-text>
-        </s-paragraph>
-      </s-section>
+      <PayoutSection
+        view={data.payoutView}
+        publicCode={f.publicCode}
+        busy={busy}
+        dryRun={(result as { dryRun?: { ordersRead: number; units: number; amountCents: number; unresolvedFlags: number } } | undefined)?.dryRun ?? null}
+      />
 
       <s-section heading="History">
         {history.length === 0 ? (

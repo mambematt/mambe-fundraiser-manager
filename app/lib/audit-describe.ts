@@ -74,6 +74,28 @@ export function describeAudit(row: AuditRow): string {
       return `${actor} added the ${after.visibility === "organizer" ? "organizer-visible" : "internal"} asset "${after.title}".`;
     case "asset:replace":
       return `${actor} replaced "${before.title}" with "${after.title}".`;
+    case "settlement:repull":
+      return `${actor} re-checked ${after.ordersRead} orders with Shopify for settlement.`;
+    case "settlement:dry_run":
+      return `${actor} ran a settlement dry run: ${after.units} units, ${money(after.amountCents)}.`;
+    case "payout:draft":
+      return `${actor} created the draft payout: ${after.units} units, ${money(after.amountCents)}.`;
+    case "payout:adjustment":
+      return `${actor} added an adjustment of ${money(after.amountCents)} (${after.note}).${reason}`;
+    case "payout:crosscheck":
+      return `${actor} cross-checked with Shopify: Shopify ${after.shopifyUnits}, app ${after.appUnits}.${reason}`;
+    case "payout:individual_payee_confirmed":
+      return `${actor} confirmed paying an individual (${after.payee}).${reason}`;
+    case "payout:approved":
+      return `${actor} approved and froze the payout: ${after.units} units, ${money(after.finalCents)}.`;
+    case "payout:reopened":
+      return `${actor} reopened the payout as a draft.${reason}`;
+    case "payout:paid":
+      return `${actor} recorded the payment: ${money(after.amountCents)} on ${date(after.paidOn)}, reference ${after.reference}.${reason}`;
+    case "payout:refund_after_payout":
+      return `Refund after payout: order ${after.orderName}, ${after.units} unit${after.units === 1 ? "" : "s"} (${money(after.amountCents)} at the payout rate). Accepted risk, no action.`;
+    case "payout:refund_after_approval":
+      return `Refund after approval: order ${after.orderName}, ${after.units} unit${after.units === 1 ? "" : "s"} (${money(after.amountCents)}). The approved payout is frozen; reopen it to include this.`;
     default:
       return `${actor}: ${row.action}${reason}`;
   }

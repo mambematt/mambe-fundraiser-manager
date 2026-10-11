@@ -33,12 +33,13 @@ export function PortalFundraiserView({ view, qrSvg, now, preview }: { view: Port
             <div className="big">{view.units}</div>
           </div>
           <div>
-            <div className="muted">Raised so far</div>
-            <div className="big">{view.estimatedRaised}</div>
+            <div className="muted">{view.finalAmount ? "Final amount" : "Raised so far"}</div>
+            <div className="big">{view.finalAmount ?? view.estimatedRaised}</div>
           </div>
         </div>
         <p className="muted">
-          Estimated, final after settlement · {view.ratePerItem} per item · {minutesAgo(view.dataAsOf, now)}
+          {view.finalAmount ? "Final" : "Estimated, final after settlement"} · {view.ratePerItem} per item
+          {view.finalAmount ? "" : ` · ${minutesAgo(view.dataAsOf, now)}`}
         </p>
       </div>
 

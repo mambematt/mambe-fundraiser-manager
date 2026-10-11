@@ -26,6 +26,7 @@ import {
   settleDue,
   settlementDueAt,
 } from "../../app/services/settlement.server";
+import { portalView } from "../../app/services/portal.server";
 import { resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
 import { fakeShopify } from "../helpers/fake-shopify";
 import { CAPE, pt, shopifyOrderNode } from "../helpers/fixtures";
@@ -357,6 +358,18 @@ describe("approve, reopen, pay", () => {
     const line = await db.orderLineItem.findFirstOrThrow();
     await db.orderLineItem.update({ where: { id: line.id }, data: { reviewFlags: ["discount"] } });
     await expect(decideLine(db, line.id, "exclude", "x", "Matt")).rejects.toThrow(/paid|locked/);
+  });
+
+  test("portal shows the payout stage: confirming, final (approved), paid with date and reference", async () => {
+    const { f, organizer, payout } = await settledDraft(3);
+    expect((await portalView(db, f.id, organizer.id))!.payoutStatus).toBe("We're confirming your final total.");
+    await crosscheckAndApprove(payout.id);
+    const approved = (await portalView(db, f.id, organizer.id))!;
+    expect(approved).toMatchObject({ finalAmount: "$75.00", units: 3, payoutStatus: "Final: $75.00, payment on its way." });
+    await recordPayment(db, null, payout.id, { paidOn: "2026-11-25", method: "PayPal", reference: "PP-1", amountCents: 7500, note: "" }, "Matt");
+    const paid = (await portalView(db, f.id, organizer.id))!;
+    expect(paid.payoutStatus).toBe("Paid $75.00 on Nov 25 by PayPal (reference PP-1).");
+    expect(JSON.stringify(paid)).not.toMatch(/#\d{4}/); // still no order numbers
   });
 
   test("Payout Sent fires when Organizer emails is on, with the amount and reference", async () => {

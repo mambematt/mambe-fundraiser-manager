@@ -4,7 +4,9 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { STATUS_MESSAGES, suggestedAction, PORTAL_HELP_EMAIL } from "../content/portal-copy";
-import { addDays, dayStatus, daysBetween, todayPacific } from "../lib/calendar";
+import { DateTime } from "luxon";
+import { dayStatus, daysBetween, todayPacific } from "../lib/calendar";
+import { settlementDueAt } from "./settlement.server";
 import { hashKey, hashToken, newToken } from "../lib/portal-tokens.server";
 import { STATUS_LABELS, type FundraiserStatus } from "../lib/status";
 import { writeAudit } from "./audit.server";
@@ -215,6 +217,8 @@ export interface PortalView {
   suggestion: string | null;
   assets: Array<{ id: number; title: string; kind: string; url: string }>;
   payoutStatus: string;
+  /** Set once the payout is approved or paid: the amount is final, not estimated. */
+  finalAmount: string | null;
   helpEmail: string;
 }
 
@@ -242,7 +246,18 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
   const today = todayPacific(now);
   const day = daysBetween(startDate, today) + 1;
   const daysLeft = Math.max(0, daysBetween(today, endDate));
-  const settleBy = addDays(endDate, 10);
+  // The settlement day in the fundraiser's timezone (window end + 10 days).
+  const settleBy = DateTime.fromJSDate(settlementDueAt(f)).setZone(f.timezone).toISODate()!;
+  const payout = f.payout;
+  const finalCents = payout && payout.status !== "draft" ? (payout.finalCents ?? payout.amountCents) : null;
+  const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const payoutMessage = !payout
+    ? `Your final total is confirmed by ${shortDate(settleBy)} (10 days after the end date), then paid by PayPal.`
+    : payout.status === "draft"
+      ? "We're confirming your final total."
+      : payout.status === "approved"
+        ? `Final: ${money(finalCents!)}, payment on its way.`
+        : `Paid ${money(payout.paidAmountCents ?? finalCents!)} on ${shortDate(DateTime.fromJSDate(payout.paidAt!).setZone(f.timezone).toISODate()!)} by PayPal${payout.paypalReference ? ` (reference ${payout.paypalReference})` : ""}.`;
 
   return {
     id: f.id,
@@ -256,13 +271,15 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
     endDate: shortDate(endDate),
     dayStatus: dayStatus(startDate, endDate, now),
     shortLink: f.shortUrl && f.shortLinkRedirectId ? `${storefrontUrl()}${f.shortUrl}` : null,
-    units: totals.qualifyingUnits,
+    // Once frozen, the units paid; before that, the live count.
+    units: payout && payout.status !== "draft" ? payout.qualifyingUnits : totals.qualifyingUnits,
     estimatedRaised: `$${(totals.estimatedPayoutCents / 100).toFixed(2)}`,
+    finalAmount: finalCents !== null ? money(finalCents) : null,
     ratePerItem: `$${(f.payoutRateCents / 100).toFixed(f.payoutRateCents % 100 ? 2 : 0)}`,
     dataAsOf: lastWebhook?.receivedAt.toISOString() ?? null,
     suggestion: suggestedAction({ status: f.status, day, daysLeft }),
     assets: f.assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url ?? "" })),
-    payoutStatus: f.payout ? f.payout.status : "Not calculated yet: your payout is worked out 10 days after the end date.",
+    payoutStatus: payoutMessage,
     helpEmail: PORTAL_HELP_EMAIL,
   };
 }
