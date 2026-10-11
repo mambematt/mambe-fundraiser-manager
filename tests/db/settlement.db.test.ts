@@ -25,6 +25,7 @@ import {
   reopenPayout,
   settleDue,
   settlementDueAt,
+  testSwitches,
 } from "../../app/services/settlement.server";
 import { portalView } from "../../app/services/portal.server";
 import { resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
@@ -137,6 +138,14 @@ describe("settlement timing", () => {
     await settleDue(db, shopify, pt("2026-10-30T15:05:00"));
     expect(await db.payout.findFirstOrThrow()).toMatchObject({ qualifyingUnits: 1, status: "draft" });
     expect((await db.fundraiser.findUniqueOrThrow({ where: { id: f.id } })).status).toBe("cancelled");
+  });
+});
+
+describe("staging test switches", () => {
+  test("ignored unless ALLOW_TEST_SWITCHES=true; production never sets it", () => {
+    expect(testSwitches({ SETTLEMENT_DELAY_DAYS: "0", SIMULATE_REPULL_FAILURE: "true" } as NodeJS.ProcessEnv)).toEqual({ delayDays: 10, simulateRepullFailure: false });
+    expect(testSwitches({ ALLOW_TEST_SWITCHES: "true", SETTLEMENT_DELAY_DAYS: "0", SIMULATE_REPULL_FAILURE: "true" } as NodeJS.ProcessEnv)).toEqual({ delayDays: 0, simulateRepullFailure: true });
+    expect(testSwitches({ ALLOW_TEST_SWITCHES: "true", SETTLEMENT_DELAY_DAYS: "-3" } as NodeJS.ProcessEnv).delayDays).toBe(10);
   });
 });
 

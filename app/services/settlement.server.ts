@@ -23,6 +23,21 @@ export { acknowledgePayoutChange } from "./payout-changes.server";
 import type { ShopifyClient } from "./shopify-api.server";
 
 export const SETTLEMENT_DELAY_DAYS = 10;
+
+/**
+ * Staging-only test switches, honored only when ALLOW_TEST_SWITCHES=true
+ * (never set on production):
+ *   SETTLEMENT_DELAY_DAYS=0       settle right after the end
+ *   SIMULATE_REPULL_FAILURE=true  make the settlement re-pull fail
+ */
+export function testSwitches(env: NodeJS.ProcessEnv = process.env) {
+  const allowed = env.ALLOW_TEST_SWITCHES === "true";
+  const delay = Number(env.SETTLEMENT_DELAY_DAYS);
+  return {
+    delayDays: allowed && Number.isInteger(delay) && delay >= 0 ? delay : SETTLEMENT_DELAY_DAYS,
+    simulateRepullFailure: allowed && env.SIMULATE_REPULL_FAILURE === "true",
+  };
+}
 /** The first this-many payouts need a Shopify cross-check before approval. */
 export const REQUIRED_CROSSCHECKS = 3;
 const DAY = 24 * 3600 * 1000;
@@ -34,9 +49,9 @@ type Tx = Prisma.TransactionClient;
 /** Window end + 10 days (local time, so DST can't shift it), or cancelled_at + 10 days. */
 export function settlementDueAt(f: { windowEnd: Date; cancelledAt: Date | null; timezone: string }): Date {
   if (f.cancelledAt && f.cancelledAt < f.windowEnd) {
-    return new Date(f.cancelledAt.getTime() + SETTLEMENT_DELAY_DAYS * DAY);
+    return new Date(f.cancelledAt.getTime() + testSwitches().delayDays * DAY);
   }
-  return DateTime.fromJSDate(f.windowEnd).setZone(f.timezone || DEFAULT_TIMEZONE).plus({ days: SETTLEMENT_DELAY_DAYS }).toJSDate();
+  return DateTime.fromJSDate(f.windowEnd).setZone(f.timezone || DEFAULT_TIMEZONE).plus({ days: testSwitches().delayDays }).toJSDate();
 }
 
 // ------------------------------------------------------------- re-pull
@@ -47,6 +62,7 @@ export function settlementDueAt(f: { windowEnd: Date; cancelledAt: Date | null; 
  * range), re-read and re-attributed. Any failure fails the whole re-pull.
  */
 export async function fullRepull(db: PrismaClient, shopify: ShopifyClient, fundraiserId: number) {
+  if (testSwitches().simulateRepullFailure) throw new Error("Simulated Shopify failure (staging test switch)");
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { product: true } });
   const since = new Date(f.windowStart.getTime() - DAY);
   const fromShopify = await shopify.listOrderIdsForProductSince(f.product.shopifyProductId, since);
