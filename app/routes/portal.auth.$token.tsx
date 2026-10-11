@@ -32,7 +32,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         ? `This link was already used, ${time(result.at)}.`
         : result.reason === "expired"
           ? `This link expired ${time(result.at)}.`
-          : "This link wasn't recognized.";
+          : `This link wasn't recognized (ref ${(params.token ?? "").slice(0, 4)}…${(params.token ?? "").slice(-4)}, ${(params.token ?? "").length} characters, via ${request.headers.get("x-remix-response") ? "app" : new URL(request.url).pathname.endsWith(".data") ? "data request" : "page form"}).`;
     return redirect(`/portal/login?reason=expired&why=${encodeURIComponent(why)}`);
   }
   const raw = await createSession(db, result.organizerId);
