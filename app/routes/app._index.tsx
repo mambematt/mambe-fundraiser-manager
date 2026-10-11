@@ -12,6 +12,9 @@ import { formatCents } from "../lib/money";
 import { attempt, formText } from "../services/actions.server";
 import { alert, flushAlerts } from "../services/alerts.server";
 import { runNightlyRecheck } from "../services/jobs.server";
+import { sendSampleEvents } from "../services/communications.server";
+import { createKlaviyoClient } from "../services/klaviyo.server";
+import { staffName } from "../services/staff.server";
 import { loadNumberStrip, loadWorkQueue } from "../services/dashboard.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 
@@ -39,6 +42,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     run ? { at: run.startedAt.toISOString(), status: run.status, error: run.error?.split("\n")[0] ?? null, details: run.details ? JSON.stringify(run.details) : "" } : null;
 
   return {
+    klaviyoTestRecipient: process.env.KLAVIYO_TEST_RECIPIENT ?? "",
     strip,
     queue,
     lines: lines.map((l) => ({
@@ -79,6 +83,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const form = await request.formData();
   return attempt(async () => {
+    if (formText(form, "intent") === "klaviyoSamples") {
+      if (!process.env.KLAVIYO_API_KEY) return { ok: false, message: "KLAVIYO_API_KEY isn't set on this service in Render." };
+      const count = await sendSampleEvents(db, createKlaviyoClient(), formText(form, "email"), staffName(session));
+      return {
+        ok: true,
+        message: `Sent ${count} sample events. In Klaviyo, each email type now appears under Analytics → Metrics, ready for its flow.`,
+      };
+    }
     if (formText(form, "intent") === "testAlert") {
       if (!process.env.SENTRY_DSN) return { ok: false, message: "SENTRY_DSN isn't set on this service in Render." };
       alert(`Test alert from ${process.env.RENDER_SERVICE_NAME ?? "the app"}. Alerts reach Sentry; no action needed.`);
@@ -228,6 +240,20 @@ export default function Index() {
             </s-table-body>
           </s-table>
         )}
+      </s-section>
+
+      <s-section heading="Klaviyo setup">
+        <Form method="post">
+          <input type="hidden" name="intent" value="klaviyoSamples" />
+          <s-stack direction="inline" gap="base" alignItems="end">
+            <s-email-field name="email" label="Send one sample of every organizer email event to" defaultValue={data.klaviyoTestRecipient} required />
+            <s-button type="submit" disabled={busy}>Send sample Klaviyo events</s-button>
+          </s-stack>
+        </Form>
+        <s-text color="subdued">
+          Creates each metric in Klaviyo (a flow can only be triggered by a metric Klaviyo has seen) and gives template previews
+          realistic fields. Samples never go to organizers.
+        </s-text>
       </s-section>
 
       <div id="sync" />

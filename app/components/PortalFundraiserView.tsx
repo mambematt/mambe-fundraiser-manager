@@ -21,7 +21,7 @@ export function PortalFundraiserView({ view, qrSvg, now, preview }: { view: Port
         <span className="badge">{view.statusLabel}</span>
         <h1>{view.organization}</h1>
         <div className="muted">
-          {view.team} · {view.startDate} to {view.endDate} · {view.dayStatus}
+          {view.team} · {view.startDate} – {view.endDate} · {view.dayStatus}
         </div>
         {view.statusMessage && <p>{view.statusMessage}</p>}
       </div>

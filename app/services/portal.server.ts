@@ -189,6 +189,12 @@ export async function fundraisersForOrganizer(db: PrismaClient, organizerId: num
   });
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split("-").map(Number);
+  return `${MONTHS[m! - 1]} ${d}`;
+}
+
 export interface PortalView {
   id: number;
   publicCode: string;
@@ -229,7 +235,8 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
   if (!f) return null;
 
   const totals = await storedTotals(db, f);
-  const lastWebhook = await db.webhookEvent.findFirst({ where: { status: "processed" }, orderBy: { processedAt: "desc" } });
+  // Any webhook (even for orders without a linked product) shows the sync is live.
+  const lastWebhook = await db.webhookEvent.findFirst({ orderBy: { receivedAt: "desc" } });
   const startDate = isoDate(f.startDate);
   const endDate = isoDate(f.endDate);
   const today = todayPacific(now);
@@ -244,15 +251,15 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
     team: f.team.name,
     status: f.status,
     statusLabel: STATUS_LABELS[f.status as FundraiserStatus] ?? f.status,
-    statusMessage: (STATUS_MESSAGES[f.status] ?? "").replace("{settle date}", settleBy),
-    startDate,
-    endDate,
+    statusMessage: (STATUS_MESSAGES[f.status] ?? "").replace("{settle date}", shortDate(settleBy)),
+    startDate: shortDate(startDate),
+    endDate: shortDate(endDate),
     dayStatus: dayStatus(startDate, endDate, now),
     shortLink: f.shortUrl && f.shortLinkRedirectId ? `${storefrontUrl()}${f.shortUrl}` : null,
     units: totals.qualifyingUnits,
     estimatedRaised: `$${(totals.estimatedPayoutCents / 100).toFixed(2)}`,
     ratePerItem: `$${(f.payoutRateCents / 100).toFixed(f.payoutRateCents % 100 ? 2 : 0)}`,
-    dataAsOf: lastWebhook?.processedAt?.toISOString() ?? null,
+    dataAsOf: lastWebhook?.receivedAt.toISOString() ?? null,
     suggestion: suggestedAction({ status: f.status, day, daysLeft }),
     assets: f.assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url ?? "" })),
     payoutStatus: f.payout ? f.payout.status : "Not calculated yet: your payout is worked out 10 days after the end date.",

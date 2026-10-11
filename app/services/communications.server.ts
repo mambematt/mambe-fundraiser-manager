@@ -190,6 +190,49 @@ export async function sendDueCommunications(db: PrismaClient, klaviyo: KlaviyoCl
   return summary;
 }
 
+/**
+ * One sample event of every email type, to one address, so each metric
+ * exists in Klaviyo (a flow trigger can only use a metric Klaviyo has seen)
+ * and template previews show realistic fields. Uses a real fundraiser's
+ * numbers when there is one.
+ */
+export async function sendSampleEvents(db: PrismaClient, klaviyo: KlaviyoClient, email: string, actor: string, now = new Date()) {
+  const to = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new UserError("Enter the email address that should receive the samples.");
+  const sample = await db.fundraiser.findFirst({ where: { status: { in: ["active", "scheduled", "settling"] } }, orderBy: { windowStart: "desc" } });
+  const base = sample
+    ? await emailProperties(db, sample.id, now)
+    : {
+        fundraiser_code: "SAMPLE-F26",
+        organization_name: "Sample High School",
+        team_name: "Sample High School Girls Lacrosse",
+        start_date: "October 1",
+        end_date: "October 31",
+        days_left: 12,
+        day_status: "12 days left",
+        units_so_far: 18,
+        estimated_raised: "$450.00",
+        payout_rate: "$25",
+        short_link: `${storefrontUrl()}/go/sample`,
+        portal_link: portalUrl(),
+        help_email: PORTAL_HELP_EMAIL,
+      };
+  const samples: Array<[MetricName, Record<string, unknown>]> = [
+    [METRICS.launched, { email_kind: "launch", reminder_number: null }],
+    [METRICS.reminder, { email_kind: "reminder", reminder_number: 1 }],
+    [METRICS.finalDays, { email_kind: "final", reminder_number: null }],
+    [METRICS.ended, { email_kind: "ended", reminder_number: null }],
+    [METRICS.portalReady, { email_kind: "portal_ready", reminder_number: null }],
+    [METRICS.payoutSent, { email_kind: "paid", reminder_number: null, payout_amount: "$450.00", paypal_reference: "SAMPLE-REF" }],
+  ];
+  const stamp = now.getTime();
+  for (const [metric, extra] of samples) {
+    await klaviyo.sendEvent(metric, { email: to, firstName: "Sample" }, { ...base, ...extra, organizer_first_name: "Sample", is_sample: true }, `sample-${metric}-${stamp}`);
+  }
+  await writeAudit(db, { entity: "klaviyo", entityId: "samples", action: "sample_events", after: { to, metrics: samples.map(([m]) => m) }, actor });
+  return samples.length;
+}
+
 /** Admin "Send now" for one row. Audited. */
 export async function sendNow(db: PrismaClient, klaviyo: KlaviyoClient, communicationId: number, actor: string, now = new Date()) {
   const comm = await db.communication.findUniqueOrThrow({ where: { id: communicationId }, include: { fundraiser: true } });
