@@ -1,22 +1,43 @@
 // Cookies, CSRF and client IP for the organizer portal's public routes.
 import { newToken, safeEqual } from "../lib/portal-tokens.server";
-import { SESSION_DAYS } from "./portal.server";
+import type { PrismaClient } from "@prisma/client";
+import { SESSION_DAYS, sessionOrganizerId } from "./portal.server";
 
 export const SESSION_COOKIE = "mf_portal";
 export const CSRF_COOKIE = "mf_csrf";
 
-export function readCookie(request: Request, name: string): string | null {
+/** Every value sent for a cookie name (a browser can hold two with different paths). */
+export function readCookies(request: Request, name: string): string[] {
   const header = request.headers.get("Cookie") ?? "";
+  const values: string[] = [];
   for (const part of header.split(/;\s*/)) {
     const [k, ...v] = part.split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
+    if (k === name && v.length) values.push(decodeURIComponent(v.join("=")));
+  }
+  return values;
+}
+
+export function readCookie(request: Request, name: string): string | null {
+  return readCookies(request, name)[0] ?? null;
+}
+
+/** The signed-in organizer, trying each session cookie the browser sent. */
+export async function currentOrganizerId(db: PrismaClient, request: Request): Promise<number | null> {
+  for (const raw of readCookies(request, SESSION_COOKIE)) {
+    const id = await sessionOrganizerId(db, raw);
+    if (id) return id;
   }
   return null;
 }
 
-/** Host-only (no Domain), so the cookie belongs to the portal's host alone. */
+/**
+ * Host-only (no Domain), so the cookie belongs to the portal's host alone.
+ * Path=/ rather than /portal: React Router fetches the portal home's data
+ * from "/portal.data", which a "/portal" cookie path doesn't cover (found on
+ * staging: signing in landed back on "Please sign in").
+ */
 function cookie(name: string, value: string, maxAgeSeconds: number, sameSite: "Lax" | "Strict"): string {
-  return `${name}=${encodeURIComponent(value)}; Path=/portal; HttpOnly; Secure; SameSite=${sameSite}; Max-Age=${maxAgeSeconds}`;
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=${sameSite}; Max-Age=${maxAgeSeconds}`;
 }
 
 export function sessionCookie(raw: string): string {
@@ -37,9 +58,9 @@ export function issueCsrf(): { token: string; setCookie: string } {
 }
 
 export function csrfOk(request: Request, form: FormData): boolean {
-  const fromCookie = readCookie(request, CSRF_COOKIE);
   const fromForm = form.get("csrf");
-  return !!fromCookie && typeof fromForm === "string" && safeEqual(fromCookie, fromForm);
+  if (typeof fromForm !== "string" || !fromForm) return false;
+  return readCookies(request, CSRF_COOKIE).some((value) => safeEqual(value, fromForm));
 }
 
 /** The visitor's IP, used only (hashed) for rate limiting; never stored in the access log. */

@@ -6,13 +6,13 @@ import QRCode from "qrcode";
 import db from "../db.server";
 import { PortalLayout } from "../components/PortalLayout";
 import { PortalFundraiserView } from "../components/PortalFundraiserView";
-import { fundraisersForOrganizer, logVisit, portalView, sessionOrganizerId } from "../services/portal.server";
-import { readCookie, SESSION_COOKIE } from "../services/portal-http.server";
+import { fundraisersForOrganizer, logVisit, portalView } from "../services/portal.server";
+import { currentOrganizerId } from "../services/portal-http.server";
 
 export const meta: MetaFunction = () => [{ title: "Your fundraiser · Mambe" }];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const organizerId = await sessionOrganizerId(db, readCookie(request, SESSION_COOKIE));
+  const organizerId = await currentOrganizerId(db, request);
   if (!organizerId) throw redirect("/portal/login?reason=signin");
   const view = await portalView(db, Number(params.id), organizerId);
   if (!view) throw new Response("Not found", { status: 404 });

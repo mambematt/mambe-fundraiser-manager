@@ -4,13 +4,13 @@ import { redirect, useLoaderData } from "react-router";
 import db from "../db.server";
 import { PortalLayout } from "../components/PortalLayout";
 import { STATUS_LABELS, type FundraiserStatus } from "../lib/status";
-import { fundraisersForOrganizer, logVisit, sessionOrganizerId } from "../services/portal.server";
-import { readCookie, SESSION_COOKIE } from "../services/portal-http.server";
+import { fundraisersForOrganizer, logVisit } from "../services/portal.server";
+import { currentOrganizerId } from "../services/portal-http.server";
 
 export const meta: MetaFunction = () => [{ title: "Your fundraisers · Mambe" }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const organizerId = await sessionOrganizerId(db, readCookie(request, SESSION_COOKIE));
+  const organizerId = await currentOrganizerId(db, request);
   if (!organizerId) throw redirect("/portal/login?reason=signin");
   const list = await fundraisersForOrganizer(db, organizerId);
   const current = list.filter((f) => !["paid", "cancelled"].includes(f.status));
