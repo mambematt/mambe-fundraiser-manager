@@ -33,6 +33,10 @@ export interface ShopifyClient {
   fetchProduct(shopifyProductId: string): Promise<ShopifyProductInfo | null>;
   /** Every order ID containing the product, oldest first. */
   listOrderIdsForProduct(shopifyProductId: string): Promise<string[]>;
+  /** Orders containing the product with checkout at or after `since` (settlement re-pull). */
+  listOrderIdsForProductSince(shopifyProductId: string, since: Date): Promise<string[]>;
+  /** The store's timezone, e.g. "America/New_York" (Shopify reports use it). */
+  fetchShopTimezone(): Promise<string>;
   /**
    * Every order updated at or after `since`, with the product IDs on it
    * (null if the order has too many lines to list cheaply).
@@ -179,6 +183,11 @@ export const ORDERS_UPDATED_SINCE_QUERY = `#graphql
     }
   }`;
 
+export const SHOP_TIMEZONE_QUERY = `#graphql
+  query FundraiserShopTimezone {
+    shop { ianaTimezone timezoneAbbreviation }
+  }`;
+
 const MAX_ATTEMPTS = 5;
 
 function isThrottled(error: unknown): boolean {
@@ -246,6 +255,25 @@ export function createShopifyClient(run: GraphqlRunner): ShopifyClient {
         after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
       } while (after);
       return ids;
+    },
+
+    async listOrderIdsForProductSince(shopifyProductId, since) {
+      const ids: string[] = [];
+      let after: string | null = null;
+      do {
+        const data = await run(ORDER_IDS_FOR_PRODUCT_QUERY, {
+          query: `product_id:${numericId(shopifyProductId)} processed_at:>='${since.toISOString()}'`,
+          after,
+        });
+        for (const node of data.orders.nodes) ids.push(numericId(node.id));
+        after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+      } while (after);
+      return ids;
+    },
+
+    async fetchShopTimezone() {
+      const data = await run(SHOP_TIMEZONE_QUERY);
+      return data.shop.ianaTimezone as string;
     },
 
     async listOrdersUpdatedSince(since) {

@@ -1,8 +1,7 @@
 // The 24 owner-approved cases from docs/SPEC.md, "Attribution and payout test
 // cases". Numbered to match the spec. Cases that need the database are in
-// tests/db/spec-cases.db.test.ts and tests/db/lifecycle.db.test.ts; cases
-// that need later build steps are
-// test.todo here with their number.
+// tests/db/spec-cases.db.test.ts, lifecycle.db.test.ts, session4.db.test.ts
+// and settlement.db.test.ts. All 24 cases are real tests; none are to-do.
 //
 // Sample fundraiser: Central High Girls Lacrosse, Oct 1–31 2026, $25 per cape.
 // Daylight saving ends Nov 1, so the window closes at Nov 1, 07:00 UTC.
@@ -179,7 +178,7 @@ describe("Attribution and payout test cases (spec)", () => {
     const split = run({}, [line({ quantity: 3 }), line({ quantity: 2 })]);
     expect(split.map((r) => r.flags)).toEqual([["bulk_order"], ["bulk_order"]]);
   });
-  test.todo("Case 11: payout approval is refused while the bulk line is unresolved (settlement step)");
+  // Case 11 (payout approval refused while unresolved) is in tests/db/settlement.db.test.ts.
 
   test("Case 12: a discount code applied to a fundraiser cape → counts, flagged", () => {
     const results = run({}, [line({ discountCents: 1950 })]);
@@ -281,11 +280,11 @@ describe("Attribution and payout test cases (spec)", () => {
   // Case 19 (date change preview and save) is in tests/db/lifecycle.db.test.ts.
 
   // Case 20's nightly re-check half is in tests/db/lifecycle.db.test.ts.
-  test.todo("Case 20: the settlement re-pull confirms the order the nightly re-check added (settlement)");
+  // Case 20 (settlement re-pull half) is in tests/db/settlement.db.test.ts.
 
-  test.todo("Case 21: settlement re-pull fails; stays in Settling, flagged, no payout calculated (settlement)");
+  // Case 21 (failed re-pull) is in tests/db/settlement.db.test.ts.
 
-  test.todo("Case 22: refund on Dec 1 after the payout was frozen and paid; paid amount unchanged, refund on history (settlement)");
+  // Case 22 (refund after payment) is in tests/db/settlement.db.test.ts.
 
   // Case 23 (cost per item kept from time of sale) is in tests/db/spec-cases.db.test.ts.
 

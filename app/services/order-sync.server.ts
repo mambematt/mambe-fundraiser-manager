@@ -18,6 +18,7 @@ import {
 import { normalizeOrder, type NormalizedLine, type NormalizedOrder } from "../lib/shopify-order";
 import type { ShopifyClient } from "./shopify-api.server";
 import { writeAudit } from "./audit.server";
+import { notePostFreezeChange } from "./payout-changes.server";
 import { attributionOptions } from "./settings.server";
 
 type Tx = Prisma.TransactionClient;
@@ -213,7 +214,12 @@ export async function attributeSavedOrder(tx: Tx, orderId: number, now = new Dat
 
   for (const result of results) {
     const line = order.lineItems.find((l) => String(l.id) === result.key)!;
-    if (line.locked) continue;
+    if (line.locked) {
+      // Frozen in a payout: attribution never changes, but a later refund
+      // is recorded for History (spec Case 22).
+      await notePostFreezeChange(tx, line, order);
+      continue;
+    }
     const before = storedAttribution(line);
     const changed =
       line.outcome === "pending" ||

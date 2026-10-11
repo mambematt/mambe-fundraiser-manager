@@ -6,6 +6,7 @@ import { lastDays, monthToDate, yearToDate } from "../lib/calendar";
 import { buildWorkQueue, type QueueGroup } from "../lib/work-queue";
 import { isoDate } from "./fundraisers.server";
 import { webhookHealth } from "./jobs.server";
+import { outstandingPayoutCents, payoutSummary } from "./settlement.server";
 
 export interface NumberStrip {
   active: number;
@@ -24,7 +25,7 @@ export async function loadNumberStrip(db: PrismaClient, now = new Date()): Promi
 
   const [statusCounts, outstanding, lines] = await Promise.all([
     db.fundraiser.groupBy({ by: ["status"], _count: true }),
-    db.payout.aggregate({ where: { status: "approved" }, _sum: { amountCents: true } }),
+    outstandingPayoutCents(db),
     db.orderLineItem.findMany({
       where: { order: { processedAt: { gte: earliest } }, outcome: { in: ["qualifying", "non_fundraiser"] } },
       include: { order: { select: { processedAt: true } }, attributedFundraiser: { select: { payoutRateCents: true } } },
@@ -48,7 +49,7 @@ export async function loadNumberStrip(db: PrismaClient, now = new Date()): Promi
     active: count("active"),
     scheduled: count("scheduled"),
     settling: count("settling"),
-    payoutsOutstandingCents: outstanding._sum.amountCents ?? 0,
+    payoutsOutstandingCents: outstanding,
     month: { units: month.qualifyingUnits, estimatedPayoutCents: month.estimatedPayoutCents },
     year: { units: ytd.qualifyingUnits, estimatedPayoutCents: ytd.estimatedPayoutCents },
     outsideWindowUnits30d: recent.outsideWindowUnits,
@@ -69,7 +70,7 @@ export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise
       },
       select: { attributedFundraiserId: true },
     }),
-    db.payout.aggregate({ where: { status: "approved" }, _count: true, _sum: { amountCents: true } }),
+    db.payout.aggregate({ where: { status: "approved" }, _count: true, _sum: { finalCents: true } }),
     db.webhookEvent.count({ where: { status: "failed" } }),
     db.jobRun.findFirst({ where: { name: "nightly", status: "succeeded" }, orderBy: { startedAt: "desc" } }),
     webhookHealth(db, now),
@@ -93,11 +94,37 @@ export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise
     })),
     newApplications,
     flagsByFundraiser: [...flagCounts].map(([id, count]) => ({ id, publicCode: codes.get(id) ?? `#${id}`, count })),
-    payoutsToSend: { count: payouts._count, amountCents: payouts._sum.amountCents ?? 0 },
+    payoutsToSend: { count: payouts._count, amountCents: payouts._sum.finalCents ?? 0 },
     failedWebhooks,
     lastNightlyOkAt: lastNightlyOk?.startedAt ?? null,
     webhookSilence: health.silent,
     failedEmails: failedEmails.map((g) => ({ id: g.fundraiserId, publicCode: codes.get(g.fundraiserId) ?? `#${g.fundraiserId}`, count: g._count })),
+    repullFailures: fundraisers
+      .filter((f) => f.settlementError)
+      .map((f) => ({ id: f.id, publicCode: f.publicCode, error: f.settlementError! })),
+    payoutsToReview: await Promise.all(
+      (await db.payout.findMany({ where: { status: "draft" }, include: { fundraiser: true } })).map(async (p) => ({
+        id: p.fundraiserId,
+        publicCode: p.fundraiser.publicCode,
+        finalCents: (await payoutSummary(db, p.id)).finalCents,
+      })),
+    ),
+    approvedUnpaid: (await db.payout.findMany({ where: { status: "approved" }, include: { fundraiser: true } })).map((p) => ({
+      id: p.fundraiserId,
+      publicCode: p.fundraiser.publicCode,
+      finalCents: p.finalCents ?? 0,
+    })),
+    refundsAfterPayout: Object.values(
+      (await db.payoutChange.findMany({ where: { acknowledgedAt: null }, include: { payout: { include: { fundraiser: true } } } })).reduce(
+        (acc, c) => {
+          const key = c.payout.fundraiserId;
+          acc[key] ??= { id: key, publicCode: c.payout.fundraiser.publicCode, count: 0, status: c.payout.status };
+          acc[key].count += 1;
+          return acc;
+        },
+        {} as Record<number, { id: number; publicCode: string; count: number; status: string }>,
+      ),
+    ),
     storefrontErrors: fundraisers
       .filter((f) => f.storefrontError)
       .map((f) => ({ id: f.id, publicCode: f.publicCode, error: f.storefrontError! })),

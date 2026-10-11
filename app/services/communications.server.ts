@@ -77,7 +77,7 @@ export async function cancelCommunications(db: PrismaClient, fundraiserId: numbe
 }
 
 /** A one-off email (launch, ended, portal ready), due now. */
-export async function queueEmail(db: PrismaClient, fundraiserId: number, kind: "launch" | "ended" | "portal_ready", now = new Date()) {
+export async function queueEmail(db: PrismaClient, fundraiserId: number, kind: "launch" | "ended" | "portal_ready" | "paid", now = new Date()) {
   return db.communication.create({ data: { fundraiserId, kind, scheduledFor: now, status: "scheduled" } });
 }
 
@@ -94,7 +94,7 @@ export async function setEmailsEnabled(db: PrismaClient, id: number, enabled: bo
 export async function emailProperties(db: PrismaClient, fundraiserId: number, now = new Date()) {
   const f = await db.fundraiser.findUniqueOrThrow({
     where: { id: fundraiserId },
-    include: { team: { include: { organization: true } }, product: { select: { handle: true } } },
+    include: { team: { include: { organization: true } }, product: { select: { handle: true } }, payout: true },
   });
   const totals = await storedTotals(db, f);
   const startDate = isoDate(f.startDate);
@@ -118,6 +118,10 @@ export async function emailProperties(db: PrismaClient, fundraiserId: number, no
     has_short_link: !!(f.shortUrl && f.shortLinkRedirectId),
     portal_link: portalUrl(),
     help_email: PORTAL_HELP_EMAIL,
+    // Present once the payout is paid (the "Payout Sent" email).
+    payout_amount: f.payout?.paidAmountCents != null ? `$${(f.payout.paidAmountCents / 100).toFixed(2)}` : null,
+    paypal_reference: f.payout?.paypalReference ?? null,
+    paid_date: f.payout?.paidAt ? DateTime.fromJSDate(f.payout.paidAt).setZone("America/Los_Angeles").toFormat("LLLL d") : null,
   };
 }
 

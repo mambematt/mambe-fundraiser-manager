@@ -181,13 +181,19 @@ model Fundraiser {
   // Last storefront write failure, cleared on success (shown in the work queue).
   storefrontError     String?   @map("storefront_error")
   storefrontErrorAt   DateTime? @map("storefront_error_at") @db.Timestamptz(3)
-  paypalPayeeEmail    String?   @map("paypal_payee_email") // the organization's account
-  driveFolderId       String?   @map("drive_folder_id")
-  cancelledAt         DateTime? @map("cancelled_at") @db.Timestamptz(3)
-  cancelReason        String?   @map("cancel_reason")
-  notes               String?
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Settlement (session 5): the full re-pull from Shopify before a payout.
+  settlementRepulledAt   DateTime? @map("settlement_repulled_at") @db.Timestamptz(3)
+  settlementRepullOrders Int?      @map("settlement_repull_orders")
+  settlementError        String?   @map("settlement_error") // "Re-pull failed: …" while it keeps failing
+  settlementErrorAt      DateTime? @map("settlement_error_at") @db.Timestamptz(3)
+  paypalPayeeEmail       String?   @map("paypal_payee_email") // the organization's account
+  driveFolderId          String?   @map("drive_folder_id")
+  cancelledAt            DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason           String?   @map("cancel_reason")
+  notes                  String?
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   team           Team                  @relation(fields: [teamId], references: [id])
   product        Product               @relation(fields: [productId], references: [id])
@@ -306,12 +312,33 @@ model Payout {
   method          String?
   paypalReference String?   @map("paypal_reference")
   payeeEmail      String?   @map("payee_email")
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  // amountCents = units × rate. finalCents = amount + adjustments, frozen at approval.
+  finalCents      Int?      @map("final_cents")
+
+  // Shopify cross-check (required for the first 3 payouts).
+  crosscheckShopifyUnits Int?      @map("crosscheck_shopify_units")
+  crosscheckAppUnits     Int?      @map("crosscheck_app_units")
+  crosscheckNote         String?   @map("crosscheck_note")
+  crosscheckBy           String?   @map("crosscheck_by")
+  crosscheckAt           DateTime? @map("crosscheck_at") @db.Timestamptz(3)
+
+  // Paying an individual (payee email = an organizer's own) needs confirmation.
+  individualPayeeConfirmedBy String?   @map("individual_payee_confirmed_by")
+  individualPayeeConfirmedAt DateTime? @map("individual_payee_confirmed_at") @db.Timestamptz(3)
+  individualPayeeNote        String?   @map("individual_payee_note")
+
+  // Payment record.
+  paidAmountCents Int?    @map("paid_amount_cents")
+  paidNote        String? @map("paid_note")
+  paidBy          String? @map("paid_by")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   fundraiser  Fundraiser         @relation(fields: [fundraiserId], references: [id])
   lines       PayoutLine[]
   adjustments PayoutAdjustment[]
+  changes     PayoutChange[]
 
   @@map("payouts")
 }
@@ -328,6 +355,28 @@ model PayoutLine {
 
   @@index([payoutId])
   @@map("payout_lines")
+}
+
+// A refund or cancellation that reached a line after its payout was frozen
+// (approved or paid). Paid amounts never change; this records it for History
+// and shows once in the work queue (spec Case 22: accepted risk).
+model PayoutChange {
+  id             Int       @id @default(autoincrement())
+  payoutId       Int       @map("payout_id")
+  lineItemId     Int       @map("line_item_id")
+  orderName      String    @map("order_name")
+  unitsCounted   Int       @map("units_counted")
+  unitsNow       Int       @map("units_now")
+  amountCents    Int       @map("amount_cents") // (counted − now) × rate
+  detectedAt     DateTime  @default(now()) @map("detected_at") @db.Timestamptz(3)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(3)
+  acknowledgedBy String?   @map("acknowledged_by")
+
+  payout Payout @relation(fields: [payoutId], references: [id])
+
+  @@unique([lineItemId, unitsNow])
+  @@index([payoutId])
+  @@map("payout_changes")
 }
 
 model PayoutAdjustment {

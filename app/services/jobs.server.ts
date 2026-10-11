@@ -13,6 +13,7 @@ import type { ShopifyClient } from "./shopify-api.server";
 import { queueEmail, sendDueCommunications } from "./communications.server";
 import type { KlaviyoClient } from "./klaviyo.server";
 import { syncStorefront } from "./storefront.server";
+import { settleDue } from "./settlement.server";
 
 export type JobName = "clock" | "nightly";
 
@@ -81,8 +82,9 @@ export async function runClock(db: PrismaClient, now = new Date(), deps: ClockDe
     // Banner on while Scheduled/Active, off after (the block also checks dates).
     if (deps.shopify) details.storefront = await syncStorefront(db, deps.shopify);
     if (deps.klaviyo) details.emails = await sendDueCommunications(db, deps.klaviyo, now);
-    // TODO(settlement): Settling → Payout pending at end + 10 days, after a
-    // successful full re-pull.
+    // Settlement: at end + 10 days, full re-pull, then the draft payout and
+    // Settling → Payout pending. A failed re-pull calculates nothing.
+    if (deps.shopify) details.settlement = await settleDue(db, deps.shopify, now);
     return details;
   });
 }

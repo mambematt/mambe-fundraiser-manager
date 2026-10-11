@@ -34,6 +34,14 @@ export interface QueueInput {
   failedEmails?: Array<{ id: number; publicCode: string; count: number }>;
   /** Fundraisers whose last banner/short-link write failed. */
   storefrontErrors?: Array<{ id: number; publicCode: string; error: string }>;
+  /** Settlement re-pulls that keep failing (no payout calculated). */
+  repullFailures?: Array<{ id: number; publicCode: string; error: string }>;
+  /** Draft payouts waiting for review and approval. */
+  payoutsToReview?: Array<{ id: number; publicCode: string; finalCents: number }>;
+  /** Approved payouts not yet paid, one item each. */
+  approvedUnpaid?: Array<{ id: number; publicCode: string; finalCents: number }>;
+  /** Refunds that reached a frozen payout's lines, not yet seen. */
+  refundsAfterPayout?: Array<{ id: number; publicCode: string; count: number; status: string }>;
 }
 
 export interface QueueItem {
@@ -135,17 +143,50 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
       .map((f) => ({ label: f.publicCode, href: link(f), detail: `ended ${f.endDate}` })),
   });
 
+  add({
+    key: "repull_failed",
+    label: "Settlement re-pull failing (no payout calculated)",
+    tone: "critical",
+    items: (input.repullFailures ?? []).map((f) => ({ label: f.publicCode, href: `${link(f)}#payout`, detail: f.error.slice(0, 80) })),
+  });
+
+  add({
+    key: "payout_review",
+    label: "Payouts to review and approve",
+    tone: "warning",
+    items: (input.payoutsToReview ?? []).map((f) => ({ label: f.publicCode, href: `${link(f)}#payout`, detail: `$${(f.finalCents / 100).toFixed(2)} draft` })),
+  });
+
+  const approvedUnpaid = input.approvedUnpaid ?? [];
   add(
     {
       key: "payouts",
-      label: "Payouts to send",
+      label: "Payouts approved, not yet paid",
       tone: "info",
       items: input.payoutsToSend.count
-        ? [{ label: `${input.payoutsToSend.count} approved`, href: "/app/fundraisers?status=payout_pending", detail: `$${(input.payoutsToSend.amountCents / 100).toFixed(2)}` }]
+        ? [
+            {
+              label: `${input.payoutsToSend.count} approved: open Ready to pay`,
+              href: "/app/ready-to-pay",
+              detail: `$${(input.payoutsToSend.amountCents / 100).toFixed(2)}`,
+            },
+            ...approvedUnpaid.map((f) => ({ label: f.publicCode, href: `${link(f)}#payout`, detail: `$${(f.finalCents / 100).toFixed(2)}` })),
+          ]
         : [],
     },
     input.payoutsToSend.count,
   );
+
+  add({
+    key: "refund_after_payout",
+    label: "Refunds after a payout was frozen (accepted risk, for your information)",
+    tone: "info",
+    items: (input.refundsAfterPayout ?? []).map((f) => ({
+      label: f.publicCode,
+      href: `${link(f)}#payout`,
+      detail: `${f.count} refund${f.count === 1 ? "" : "s"} after ${f.status === "paid" ? "payment" : "approval"}`,
+    })),
+  });
 
   add({
     key: "storefront",
