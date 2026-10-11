@@ -13,6 +13,7 @@ import type { KlaviyoClient, MetricName } from "../../app/services/klaviyo.serve
 import { setStorefrontEnabled } from "../../app/services/storefront.server";
 import { refreshProduct } from "../../app/services/products.server";
 import {
+  cleanLoginToken,
   consumeLoginToken,
   createSession,
   issueLoginLink,
@@ -81,7 +82,10 @@ describe("Case 24: portal access", () => {
     expect(row.tokenHash).toBe(hashToken(token));
     expect(JSON.stringify(row)).not.toContain(token);
 
-    expect(await consumeLoginToken(db, token, new Date(now.getTime() + 60_000))).toBe(organizer.id);
+    // Stray punctuation from an email template (found on staging: a trailing "]") is ignored.
+    expect(cleanLoginToken(`${token}]`)).toBe(token);
+    expect(cleanLoginToken(`${token}%5D`)).toBe(token);
+    expect(await consumeLoginToken(db, `${token}]`, new Date(now.getTime() + 60_000))).toBe(organizer.id);
     expect(await consumeLoginToken(db, token, new Date(now.getTime() + 120_000))).toBeNull(); // used
 
     await issueLoginLink(db, k.client, organizer.id, now);

@@ -98,7 +98,25 @@ export type LoginTokenResult =
   | { ok: false; reason: "expired"; at: Date };
 
 /** Use a login link, saying why when it can't be used (shown only to whoever holds the link). */
-export async function redeemLoginToken(db: PrismaClient, token: string, now = new Date()): Promise<LoginTokenResult> {
+/**
+ * Sign-in codes only contain A–Z, a–z, 0–9, "-" and "_". Anything else
+ * (a bracket or full stop picked up by an email template or a copy-paste)
+ * isn't part of the code. Found on staging: a template added "]".
+ */
+export function cleanLoginToken(raw: string): string {
+  return decodeURIComponentSafe(raw).replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+function decodeURIComponentSafe(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+export async function redeemLoginToken(db: PrismaClient, rawToken: string, now = new Date()): Promise<LoginTokenResult> {
+  const token = cleanLoginToken(rawToken);
   if (!token || token.length < 20) return { ok: false, reason: "unknown" };
   const row = await db.portalLoginToken.findUnique({ where: { tokenHash: hashToken(token) } });
   if (!row) {
