@@ -1,0 +1,73 @@
+{%- comment -%}
+  Mambe fundraiser banner, app-embed version: for page builders (EComposer)
+  that can't take app blocks. Turn it on under Theme settings → App embeds,
+  then place this placeholder where the banner should appear (EComposer
+  custom code element):
+    <div id="mambe-fundraiser-banner"></div>
+  Same rules as the block: shows only from the start date through the end
+  date (store time), from the product metafield mambe_fundraiser.banner.
+{%- endcomment -%}
+{%- if product -%}
+  {%- assign fr = product.metafields.mambe_fundraiser.banner.value -%}
+  {%- if fr and fr.end_date and fr.start_date -%}
+    {%- assign today = 'now' | date: '%Y-%m-%d' -%}
+    {%- if today >= fr.start_date and today <= fr.end_date -%}
+      {%- assign rate = fr.rate | append: '' -%}
+      {%- assign text = block.settings.message
+        | replace: '{end date}', fr.end_display
+        | replace: '{rate}', rate
+        | replace: '{team name}', fr.team_name
+      -%}
+      <template id="mambe-fundraiser-banner-template">
+        <div
+          class="mambe-fundraiser-banner"
+          role="note"
+          style="background: {{ block.settings.background }}; color: {{ block.settings.text_color }}; padding: 12px 16px; border-radius: {{ block.settings.radius }}px; margin: 12px 0; font-weight: 600; text-align: center; line-height: 1.4;"
+        >
+          {{ text | escape }}
+        </div>
+      </template>
+      <script>
+        (function () {
+          function place() {
+            var tpl = document.getElementById("mambe-fundraiser-banner-template");
+            if (!tpl) return;
+            var spots = document.querySelectorAll("#mambe-fundraiser-banner, [data-mambe-fundraiser-banner]");
+            for (var i = 0; i < spots.length; i++) {
+              if (spots[i].getAttribute("data-filled")) continue;
+              spots[i].appendChild(tpl.content.cloneNode(true));
+              spots[i].setAttribute("data-filled", "1");
+            }
+          }
+          if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", place);
+          else place();
+          // Page builders sometimes render late; try again shortly after.
+          setTimeout(place, 1500);
+        })();
+      </script>
+    {%- endif -%}
+  {%- endif -%}
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Fundraiser banner (embed)",
+  "target": "body",
+  "settings": [
+    {
+      "type": "paragraph",
+      "content": "Shows the fundraiser banner inside <div id=\"mambe-fundraiser-banner\"></div> on product pages. Use with page builders that can't add app blocks."
+    },
+    {
+      "type": "text",
+      "id": "message",
+      "label": "Message",
+      "info": "Placeholders: {end date}, {rate}, {team name}",
+      "default": "Through {end date}, ${rate} from every purchase goes to {team name}."
+    },
+    { "type": "color", "id": "background", "label": "Background", "default": "#1f2a44" },
+    { "type": "color", "id": "text_color", "label": "Text", "default": "#ffffff" },
+    { "type": "range", "id": "radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 8 }
+  ]
+}
+{% endschema %}
