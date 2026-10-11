@@ -92,7 +92,10 @@ export async function setEmailsEnabled(db: PrismaClient, id: number, enabled: bo
 
 /** The properties every email gets, so Klaviyo templates can use any of them. */
 export async function emailProperties(db: PrismaClient, fundraiserId: number, now = new Date()) {
-  const f = await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { team: { include: { organization: true } } } });
+  const f = await db.fundraiser.findUniqueOrThrow({
+    where: { id: fundraiserId },
+    include: { team: { include: { organization: true } }, product: { select: { handle: true } } },
+  });
   const totals = await storedTotals(db, f);
   const startDate = isoDate(f.startDate);
   const endDate = isoDate(f.endDate);
@@ -109,7 +112,10 @@ export async function emailProperties(db: PrismaClient, fundraiserId: number, no
     units_so_far: totals.qualifyingUnits,
     estimated_raised: `$${(totals.estimatedPayoutCents / 100).toFixed(2)}`,
     payout_rate: `$${(f.payoutRateCents / 100).toFixed(f.payoutRateCents % 100 ? 2 : 0)}`,
-    short_link: f.shortUrl ? `${storefrontUrl()}${f.shortUrl}` : null,
+    // The /go/ short link once published; until then the product page itself,
+    // so an email never shows an empty link.
+    short_link: f.shortUrl && f.shortLinkRedirectId ? `${storefrontUrl()}${f.shortUrl}` : `${storefrontUrl()}/products/${f.product.handle}`,
+    has_short_link: !!(f.shortUrl && f.shortLinkRedirectId),
     portal_link: portalUrl(),
     help_email: PORTAL_HELP_EMAIL,
   };

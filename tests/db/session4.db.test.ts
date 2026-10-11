@@ -230,6 +230,11 @@ describe("organizer emails", () => {
     expect(k.events).toHaveLength(1);
     expect(k.events[0]).toMatchObject({ metric: "Fundraiser Reminder", to: "trissy@example.org" });
     expect(k.events[0]!.properties).toMatchObject({ reminder_number: 2, units_so_far: 0, fundraiser_code: "CHS-GLAX-F26", portal_link: expect.stringMatching(/\/portal$/) });
+    // No short link yet (storefront items off): the email still carries a working product link.
+    expect(k.events[0]!.properties).toMatchObject({
+      short_link: "https://mambeblankets.com/products/central-high-girls-lacrosse-cape",
+      has_short_link: false,
+    });
     await runClock(db, pt("2026-10-14T09:15:00"), { klaviyo: k.client });
     expect(k.events).toHaveLength(1); // sent once
   });
