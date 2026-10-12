@@ -68,11 +68,15 @@ services:
         value: "true"
       - key: APPLICATION_NOTIFY_EMAIL
         value: matt@mambeblankets.com
-      # Google Drive (session 6): the service account's whole JSON key, and the
-      # "Fundraising (staging)" shared drive's ID.
-      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+      # Google Drive (session 6): from scripts/google-drive-connect.mjs. The
+      # root is the "Fundraising (staging)" folder.
+      - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
-      - key: DRIVE_SHARED_DRIVE_ID
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: DRIVE_ROOT_FOLDER_ID
         sync: false
 
   - type: cron
@@ -143,10 +147,15 @@ services:
         sync: false
       - key: APPLICATION_NOTIFY_EMAIL
         value: matt@mambeblankets.com
-      # Google Drive: the service account key and the "Fundraising" shared drive's ID.
-      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+      # Google Drive: from scripts/google-drive-connect.mjs; the root is the
+      # "Fundraising" folder.
+      - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
-      - key: DRIVE_SHARED_DRIVE_ID
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: DRIVE_ROOT_FOLDER_ID
         sync: false
 
   - type: cron

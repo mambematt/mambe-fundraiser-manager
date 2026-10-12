@@ -67,7 +67,7 @@ export async function backupIsDue(db: PrismaClient, now: Date): Promise<boolean>
 export async function runPayoutBackup(db: PrismaClient, drive: DriveClient | null, now = new Date()) {
   const run = await db.jobRun.create({ data: { name: BACKUP_JOB, startedAt: now } });
   try {
-    if (!drive) throw new Error("Google Drive isn't set up on this service (GOOGLE_SERVICE_ACCOUNT_JSON, DRIVE_SHARED_DRIVE_ID).");
+    if (!drive) throw new Error("Google Drive isn't set up on this service (the four Google settings in Render).");
     const rows = await accountantRows(db);
     const folderId = await backupsFolderId(db, drive);
     const name = backupFileName(now);

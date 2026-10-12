@@ -1,9 +1,12 @@
-// Google Drive (spec "Google Drive"): one folder tree per fundraiser in the
-// "Fundraising" shared drive, created by a service account that is a Content
-// manager there. Folders are always found by their stored ID, never by name,
-// so nothing is ever created twice. No folder is ever shared.
+// Google Drive (spec "Google Drive"): one folder tree per fundraiser under a
+// "Fundraising" folder in the owner's My Drive (matt@mambeblankets.com; Mambe
+// has no Google Workspace, so no shared drives). The app signs in as the owner
+// with a refresh token from a one-time sign-in (scripts/google-drive-connect.mjs)
+// and only has the "drive.file" scope: it sees nothing but the folders and
+// files it created itself. Folders are always found by their stored ID, never
+// by name, so nothing is ever created twice. No folder is ever shared.
 //
-//   Fundraising/                    (the shared drive: DRIVE_SHARED_DRIVE_ID)
+//   Fundraising/                    DRIVE_ROOT_FOLDER_ID (created by the connect script)
 //     {Organization}/               organizations.drive_folder_id
 //       {Team}/                     teams.drive_folder_id
 //         _Product & Artwork/       teams.drive_artwork_folder_id (reused every season)
@@ -12,7 +15,6 @@
 //           Internal/               fundraisers.drive_internal_folder_id
 //     _Backups/                     app_settings "drive_backups_folder_id"
 
-import { createSign } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { DateTime } from "luxon";
 import { UserError } from "../lib/errors";
@@ -20,7 +22,7 @@ import { alertError } from "./alerts.server";
 import { writeAudit } from "./audit.server";
 
 export interface DriveClient {
-  /** The shared drive's ID; its root holds the organization folders. */
+  /** The "Fundraising" folder's ID; it holds the organization folders. */
   rootId: string;
   createFolder(name: string, parentId: string): Promise<{ id: string }>;
   /** Uploads a file; returns its ID. */
@@ -39,41 +41,23 @@ export function folderUrl(id: string): string {
 
 // ---------------------------------------------------------- real client
 
-interface ServiceAccountKey {
-  client_email: string;
-  private_key: string;
-}
+/** The Render settings Drive needs (all four, or Drive is off). */
+export const DRIVE_ENV_KEYS = ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN", "DRIVE_ROOT_FOLDER_ID"] as const;
 
 /** Null when Drive isn't configured on this service (the UI says so). */
 export function createDriveClient(env: NodeJS.ProcessEnv = process.env): DriveClient | null {
-  const json = env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
-  const rootId = env.DRIVE_SHARED_DRIVE_ID?.trim();
-  if (!json || !rootId) return null;
-  let key: ServiceAccountKey;
-  try {
-    key = JSON.parse(json) as ServiceAccountKey;
-  } catch {
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON isn't valid JSON; paste the whole key file.");
-  }
+  const [clientId, clientSecret, refreshToken, rootId] = DRIVE_ENV_KEYS.map((k) => env[k]?.trim());
+  if (!clientId || !clientSecret || !refreshToken || !rootId) return null;
 
   let token: { value: string; expires: number } | null = null;
   async function accessToken(): Promise<string> {
     if (token && token.expires > Date.now() + 60_000) return token.value;
-    const now = Math.floor(Date.now() / 1000);
-    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
-    const unsigned = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({
-      iss: key.client_email,
-      scope: "https://www.googleapis.com/auth/drive",
-      aud: "https://oauth2.googleapis.com/token",
-      iat: now,
-      exp: now + 3600,
-    })}`;
-    const signature = createSign("RSA-SHA256").update(unsigned).sign(key.private_key).toString("base64url");
     const res = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${unsigned}.${signature}` }),
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken!, client_id: clientId!, client_secret: clientSecret! }),
     });
+    // invalid_grant: the sign-in was revoked or expired; run the connect script again.
     if (!res.ok) throw new Error(`Google sign-in failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
     const body = (await res.json()) as { access_token: string; expires_in: number };
     token = { value: body.access_token, expires: Date.now() + body.expires_in * 1000 };
@@ -87,7 +71,7 @@ export function createDriveClient(env: NodeJS.ProcessEnv = process.env): DriveCl
   }
 
   return {
-    rootId,
+    rootId: rootId!,
     createFolder(name, parentId) {
       return google("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id", {
         method: "POST",
@@ -238,7 +222,7 @@ export async function driveLinks(db: PrismaClient, fundraiserId: number) {
 
 export function driveOrThrow(env: NodeJS.ProcessEnv = process.env): DriveClient {
   const drive = createDriveClient(env);
-  if (!drive) throw new UserError("Google Drive isn't set up on this service yet (GOOGLE_SERVICE_ACCOUNT_JSON and DRIVE_SHARED_DRIVE_ID in Render).");
+  if (!drive) throw new UserError(`Google Drive isn't set up on this service yet (${DRIVE_ENV_KEYS.join(", ")} in Render).`);
   return drive;
 }
 

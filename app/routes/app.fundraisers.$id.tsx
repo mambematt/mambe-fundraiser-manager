@@ -882,7 +882,7 @@ export default function FundraiserPage() {
                   </s-button>
                 </Form>
               ) : (
-                <s-text color="subdued">Drive isn&apos;t set up on this service yet (GOOGLE_SERVICE_ACCOUNT_JSON and DRIVE_SHARED_DRIVE_ID in Render).</s-text>
+                <s-text color="subdued">Drive isn&apos;t set up on this service yet (the four Google settings in Render).</s-text>
               ))}
             <s-text color="subdued">Folders are never shared; organizers get individual file links through Assets.</s-text>
           </s-stack>
