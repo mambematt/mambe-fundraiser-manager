@@ -62,6 +62,21 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Portal | fundraise.mambeblankets.com/portal; login link opens a Continue page so email scanners can't use it up; counts only, never order or customer details |
 | Welcome-code leak | Klaviyo welcome popup disabled for now because its "Amount off order" coupon can't be limited to a collection; existing codes may still hit fundraiser products and are caught by the discount flag |
 
+| Topic (session 5) | Decision |
+| --- | --- |
+| PayPal fees | Mambe pays any PayPal fee; the organization receives the full payout amount |
+| Reopening | An approved but unpaid payout can be reopened to draft with a required reason (lines unlocked, snapshot discarded, audited); a paid payout can never be reopened |
+| Shopify cross-check | Required before approval for the first 3 payouts, by order list rather than date range; optional afterwards |
+| Welcome coupon | Will be rebuilt as a product-scoped discount on the Promo-Eligible collection (Klaviyo supports it), then the popup turned back on |
+| NS-GSB-F26 payee | Nazareth Softball's club PayPal email is being requested to replace the organizer's personal account before approval |
+
+| Topic (session 5, built) | Decision |
+| --- | --- |
+| Settlement timing | Window end (12:00 AM after the end date) + 10 days in the fundraiser's timezone; NS-GSB-F26 settles Nov 26, 12:00 AM Pacific |
+| Approval locks | Approval locks every line attributed to the fundraiser; a late order for a frozen window shows on sales and needs a reopen to be included |
+| Backups | Hobby plan keeps 3 days of point-in-time recovery; owner takes a manual logical backup in Render before each payout run (app reminds); restore drill passed Oct 11 |
+| PayPal file | Payouts web upload, no header row: email, amount, USD, public code, note, PAYPAL; needs Payouts access on the PayPal Business account, with normal Send as fallback |
+
 ## Architecture and stack
 
 The app is one Render web service with Postgres and a few cron jobs; Shopify remains the source of truth for anything the customer touches.
