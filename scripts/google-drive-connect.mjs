@@ -107,18 +107,24 @@ async function folder(name) {
 }
 
 const line = "-".repeat(72);
+// Name on one line, value alone on the next, so a triple-click copies just the value.
+function show(name, value) {
+  console.log(`
+  ${name}  (${value.length} characters)`);
+  console.log(value);
+}
 console.log(`\n${line}\nPaste these into Render → Environment. Never into chat.\n${line}`);
 console.log("\nBoth services (mambe-fundraisers-staging AND mambe-fundraisers):");
-console.log(`  GOOGLE_OAUTH_CLIENT_ID      ${client.client_id}`);
-console.log(`  GOOGLE_OAUTH_CLIENT_SECRET  ${client.client_secret}`);
-console.log(`  GOOGLE_OAUTH_REFRESH_TOKEN  ${tokens.refresh_token}`);
+show("GOOGLE_OAUTH_CLIENT_ID", client.client_id);
+show("GOOGLE_OAUTH_CLIENT_SECRET", client.client_secret);
+show("GOOGLE_OAUTH_REFRESH_TOKEN", tokens.refresh_token);
 if (makeFolders) {
   const staging = await folder("Fundraising (staging)");
   const production = await folder("Fundraising");
   console.log("\nmambe-fundraisers-staging only:");
-  console.log(`  DRIVE_ROOT_FOLDER_ID        ${staging}`);
+  show("DRIVE_ROOT_FOLDER_ID", staging);
   console.log("\nmambe-fundraisers (production) only:");
-  console.log(`  DRIVE_ROOT_FOLDER_ID        ${production}`);
+  show("DRIVE_ROOT_FOLDER_ID", production);
   console.log('\nIn My Drive you now have "Fundraising (staging)" and "Fundraising". Renaming or moving them is fine;');
   console.log("deleting them is not (the app finds them by ID).");
 } else {

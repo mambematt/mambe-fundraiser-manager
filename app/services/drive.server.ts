@@ -46,7 +46,8 @@ export const DRIVE_ENV_KEYS = ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SE
 
 /** Null when Drive isn't configured on this service (the UI says so). */
 export function createDriveClient(env: NodeJS.ProcessEnv = process.env): DriveClient | null {
-  const [clientId, clientSecret, refreshToken, rootId] = DRIVE_ENV_KEYS.map((k) => env[k]?.trim());
+  // None of these values contain spaces; strip any (and quotes) picked up when copying from a terminal.
+  const [clientId, clientSecret, refreshToken, rootId] = DRIVE_ENV_KEYS.map((k) => env[k]?.replace(/[\s"']+/g, ""));
   if (!clientId || !clientSecret || !refreshToken || !rootId) return null;
 
   let token: { value: string; expires: number } | null = null;
