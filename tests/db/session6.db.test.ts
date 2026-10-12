@@ -8,6 +8,7 @@ import { normalizeOrder } from "../../app/lib/shopify-order";
 import {
   acceptApplication,
   declineApplication,
+  eventId,
   markSpam,
   matchSuggestions,
   retryApplicationEmail,
@@ -168,6 +169,20 @@ describe("application submit", () => {
       ["New Application", "matt@mambeblankets.com", false],
     ]);
     expect(k.events[1]!.properties.admin_link).toMatch(/^https:\/\/admin\.shopify\.com\/store\/mambe-blanket-co\/apps\/.*\/app\/applications\/1$/);
+  });
+
+  test("Klaviyo de-duplication IDs differ between staging and production (shared Klaviyo account)", async () => {
+    await submit();
+    const ids: string[] = [];
+    const client: KlaviyoClient = {
+      async sendEvent(_m, to, _p, uniqueId) {
+        ids.push(uniqueId);
+        return { deliveredTo: to.email };
+      },
+    };
+    await sendPendingApplicationEmails(db, client, { shop: null, env: { ...ON, RENDER_SERVICE_NAME: "mambe-fundraisers" }, now: NOW });
+    expect(ids).toEqual(["mambe-fundraisers-application-1-received", "mambe-fundraisers-application-1-internal"]);
+    expect(eventId(1, "received", { RENDER_SERVICE_NAME: "mambe-fundraisers-staging" } as NodeJS.ProcessEnv)).not.toBe(ids[0]);
   });
 
   test("an email failure never loses the application; it retries, then shows in the work queue", async () => {

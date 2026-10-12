@@ -137,6 +137,16 @@ function properties(app: Application, shop: string | null) {
   };
 }
 
+/**
+ * Klaviyo's de-duplication ID for an application email. Staging and production
+ * number applications separately and share one Klaviyo account, so the ID
+ * names the service: otherwise production's application #1 to the same
+ * person as staging's #1 is silently dropped as a duplicate.
+ */
+export function eventId(applicationId: number, kind: string, env: NodeJS.ProcessEnv = process.env): string {
+  return `${env.RENDER_SERVICE_NAME || "local"}-application-${applicationId}-${kind}`;
+}
+
 /** Send one application email. Never throws; records the outcome. */
 export async function sendApplicationEmail(
   db: PrismaClient,
@@ -151,9 +161,9 @@ export async function sendApplicationEmail(
     if (row.kind === "received") {
       const { firstName, lastName } = splitName(app.name ?? "");
       // Transactional: no list, no marketing consent.
-      await klaviyo.sendEvent(METRICS.applicationReceived, { email: app.email!, firstName, lastName }, props, `application-${app.id}-received`, { addToList: false });
+      await klaviyo.sendEvent(METRICS.applicationReceived, { email: app.email!, firstName, lastName }, props, eventId(app.id, "received", options.env), { addToList: false });
     } else {
-      await klaviyo.sendEvent(METRICS.newApplication, { email: notifyEmail(options.env) }, props, `application-${app.id}-internal`, { addToList: false });
+      await klaviyo.sendEvent(METRICS.newApplication, { email: notifyEmail(options.env) }, props, eventId(app.id, "internal", options.env), { addToList: false });
     }
     await db.applicationEmail.update({
       where: { id: row.id },
