@@ -117,7 +117,7 @@
   .mambe-apply__submit { width: 100%; padding: 0.9rem; font-size: 1.05rem; cursor: pointer; }
   @media (min-width: 640px) { .mambe-apply__submit { width: auto; min-width: 12rem; } }
   .mambe-apply__status { color: #b42318; }
-  .mambe-apply__thanks { font-size: 1.15rem; padding: 1.5rem 0; }
+  .mambe-apply__thanks { font-size: 1.3rem; font-weight: 600; line-height: 1.5; padding: 1rem 0 2rem; }
 </style>
 
 <script>
@@ -164,7 +164,10 @@
         .then(function (body) {
           if (body && body.ok) {
             form.hidden = true;
-            thanks.textContent = body.message || "Thanks. We'll be in touch within 2 business days.";
+            thanks.textContent = body.message || "We received your application, and we'll be in touch within 2 business days. Thanks.";
+            // A thank-you screen only: the intro invites people to apply, so hide it.
+            var intro = root.querySelector(".mambe-apply__intro");
+            if (intro) intro.hidden = true;
             thanks.hidden = false;
             thanks.scrollIntoView({ behavior: "smooth", block: "center" });
             return;

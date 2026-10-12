@@ -15,7 +15,7 @@ export const MIN_FILL_MS = 3000;
 export const RATE_LIMIT_PER_IP = 5;
 export const RATE_LIMIT_PER_EMAIL = 3;
 
-export const THANK_YOU = "Thanks. We'll be in touch within 2 business days.";
+export const THANK_YOU = "We received your application, and we'll be in touch within 2 business days. Thanks.";
 
 export interface ApplicationInput {
   name: string;
