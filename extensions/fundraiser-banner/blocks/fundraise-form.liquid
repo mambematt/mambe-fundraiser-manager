@@ -1,7 +1,7 @@
 {%- comment -%}
   Fundraiser application form (spec "Organizer journey", step 1).
   Add it to the page at /pages/fundraise: Online Store → Themes → Customize →
-  Pages → the "fundraise" template → Add block → Apps → Fundraiser application form.
+  Pages → the "fundraise" template → Add block → Apps → Fundraiser application.
 
   It posts to /apps/fundraise/apply. Shopify's App Proxy signs the request and
   forwards it to the Mambe Fundraisers app, which saves it first and then emails.
@@ -180,7 +180,7 @@
 
 {% schema %}
 {
-  "name": "Fundraiser application form",
+  "name": "Fundraiser application",
   "target": "section",
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Start a fundraiser" },
