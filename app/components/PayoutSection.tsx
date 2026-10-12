@@ -178,8 +178,8 @@ export function PayoutSection({ view, publicCode, busy, dryRun }: { view: Payout
                   ) : (
                     <s-stack gap="small">
                       <s-text color="subdued">
-                        Before approving: take a manual backup in Render (mambe-fundraisers-db → Recovery → Logical backups → Create
-                        backup). It&apos;s kept 7 days.
+                        Before approving: take a manual backup in Render (mambe-fundraisers-db → Recovery → Export → Create
+                        export). It&apos;s kept 7 days.
                       </s-text>
                       <Form method="post">
                         <input type="hidden" name="intent" value="approve" />
