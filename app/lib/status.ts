@@ -3,6 +3,9 @@
 // Attribution never looks at status: the window alone decides.
 
 export const STATUSES = [
+  // Legacy (session 6): the applications table now plays the Application
+  // stage and every new fundraiser starts in Setup. Kept so any old record in
+  // this status still shows and can be approved or declined; nothing creates it.
   "application",
   "setup",
   "scheduled",

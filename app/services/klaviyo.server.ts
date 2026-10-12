@@ -13,6 +13,9 @@ export const METRICS = {
   ended: "Fundraiser Ended",
   payoutSent: "Payout Sent",
   portalReady: "Fundraiser Portal Ready",
+  // Session 6: not tied to a fundraiser; behind APPLICATION_EMAILS_ENABLED.
+  applicationReceived: "Application Received",
+  newApplication: "New Application",
 } as const;
 
 export type MetricName = (typeof METRICS)[keyof typeof METRICS];
@@ -25,7 +28,14 @@ export interface Recipient {
 
 export interface KlaviyoClient {
   /** Sends one event to one person. `uniqueId` stops Klaviyo double-counting a retried send. */
-  sendEvent(metric: MetricName, to: Recipient, properties: Record<string, unknown>, uniqueId: string): Promise<{ deliveredTo: string }>;
+  sendEvent(
+    metric: MetricName,
+    to: Recipient,
+    properties: Record<string, unknown>,
+    uniqueId: string,
+    /** Organizers go on the organizers list; applicants and staff don't. Default true. */
+    options?: { addToList?: boolean },
+  ): Promise<{ deliveredTo: string }>;
 }
 
 const API = "https://a.klaviyo.com/api";
@@ -56,7 +66,7 @@ export function splitName(name: string): { firstName: string; lastName: string }
 
 export function createKlaviyoClient(env: NodeJS.ProcessEnv = process.env): KlaviyoClient {
   return {
-    async sendEvent(metric, to, properties, uniqueId) {
+    async sendEvent(metric, to, properties, uniqueId, options) {
       const key = env.KLAVIYO_API_KEY;
       if (!key) throw new Error("KLAVIYO_API_KEY isn't set on this service.");
       const testRecipient = env.KLAVIYO_TEST_RECIPIENT?.trim();
@@ -76,7 +86,7 @@ export function createKlaviyoClient(env: NodeJS.ProcessEnv = process.env): Klavi
       });
       const profile = (await profileRes.json().catch(() => null)) as { data?: { id?: string } } | null;
       const listId = env.KLAVIYO_ORGANIZER_LIST_ID;
-      if (listId && profile?.data?.id) {
+      if (listId && profile?.data?.id && options?.addToList !== false) {
         await call(key, `/lists/${listId}/relationships/profiles`, { data: [{ type: "profile", id: profile.data.id }] });
       }
 

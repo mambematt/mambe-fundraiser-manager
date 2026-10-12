@@ -56,6 +56,7 @@ import { issueLoginLink } from "../services/portal.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 import { publishStorefront, setBannerTeamName, setShortLinkSlug, setStorefrontEnabled, slugFor } from "../services/storefront.server";
 import { staffName } from "../services/staff.server";
+import { createDriveClient, createDriveFolders, driveLinks, driveOrThrow } from "../services/drive.server";
 
 const TABS = [
   { key: "qualifying", label: "Qualifying" },
@@ -246,6 +247,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     allOrganizers: allOrganizers.map((o) => ({ id: o.id, label: `${o.name} (${o.email})` })),
     history: history.map((h) => ({ id: String(h.id), at: h.createdAt.toISOString(), text: describeAudit(h) })),
     productChoices,
+    drive: {
+      ...(await driveLinks(db, id)),
+      configured: (() => {
+        try {
+          return !!createDriveClient();
+        } catch {
+          return false;
+        }
+      })(),
+    },
     // Settlement needs a window, so no payout section until dates are set.
     payoutView: dated
       ? await loadPayoutView(
@@ -387,6 +398,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         if (intent === "addAsset") await addAsset(db, id, input, actor);
         else await replaceAsset(db, Number(formText(form, "assetId")), input, actor);
         return { ok: true, message: intent === "addAsset" ? "Asset added." : "Asset replaced." };
+      }
+      case "createDrive": {
+        const r = await createDriveFolders(db, driveOrThrow(), id, actor);
+        if (!r.ok) throw new UserError(`Drive folders failed: ${r.error}`);
+        return { ok: true, message: "Drive folders are ready; the checklist item is ticked." };
       }
       case "setProduct": {
         const productId = formInt(form, "productId");
@@ -759,6 +775,11 @@ export default function FundraiserPage() {
               <input type="hidden" name="done" value={item.at ? "0" : "1"} />
               <s-stack direction="inline" gap="base" alignItems="center">
                 <s-text>{item.at ? "☑" : "☐"} {item.label}</s-text>
+                {item.key === "driveFoldersCreated" && data.drive.error && !data.drive.created && (
+                  <s-link href="#drive">
+                    <s-badge tone="critical">Drive folders: failed (Retry)</s-badge>
+                  </s-link>
+                )}
                 {item.at && <s-text color="subdued">{item.by} · {pacific(item.at)}</s-text>}
                 <s-button type="submit" variant="tertiary" disabled={busy}>
                   {item.at ? "Undo" : "Mark done"}
@@ -834,6 +855,39 @@ export default function FundraiserPage() {
           </s-stack>
         )}
       </s-section>
+
+      <div id="drive">
+        <s-section heading="Google Drive">
+          <s-stack gap="base">
+            {data.drive.error && !data.drive.created && (
+              <s-banner tone="critical">
+                <s-paragraph>Drive folders: failed {pacific(data.drive.errorAt)}: {data.drive.error}</s-paragraph>
+              </s-banner>
+            )}
+            {data.drive.links.length > 0 && (
+              <s-stack gap="small">
+                {data.drive.links.map((l) => (
+                  <s-paragraph key={l.url}>
+                    <s-link href={l.url} target="_blank">Open in Drive: {l.label}</s-link>
+                  </s-paragraph>
+                ))}
+              </s-stack>
+            )}
+            {!data.drive.created &&
+              (data.drive.configured ? (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="createDrive" />
+                  <s-button type="submit" variant={data.drive.error ? "primary" : "secondary"} disabled={busy}>
+                    {data.drive.error ? "Retry Drive folders" : "Create Drive folders"}
+                  </s-button>
+                </Form>
+              ) : (
+                <s-text color="subdued">Drive isn&apos;t set up on this service yet (GOOGLE_SERVICE_ACCOUNT_JSON and DRIVE_SHARED_DRIVE_ID in Render).</s-text>
+              ))}
+            <s-text color="subdued">Folders are never shared; organizers get individual file links through Assets.</s-text>
+          </s-stack>
+        </s-section>
+      </div>
 
       <s-section heading="Assets">
         <s-stack gap="base">

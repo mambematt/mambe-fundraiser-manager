@@ -42,6 +42,14 @@ export interface QueueInput {
   approvedUnpaid?: Array<{ id: number; publicCode: string; finalCents: number }>;
   /** Refunds that reached a frozen payout's lines, not yet seen. */
   refundsAfterPayout?: Array<{ id: number; publicCode: string; count: number; status: string }>;
+  /** Running fundraisers whose product was deleted in Shopify. */
+  deletedProducts?: Array<{ id: number; publicCode: string; product: string }>;
+  /** Applications whose email failed (or is still retrying). */
+  applicationEmailProblems?: Array<{ applicationId: number; label: string; detail: string }>;
+  /** Fundraisers whose last Drive folder creation failed. */
+  driveFailures?: Array<{ id: number; publicCode: string; error: string }>;
+  /** The latest weekly payout backup, if it failed. */
+  backupFailure?: { at: Date; error: string } | null;
 }
 
 export interface QueueItem {
@@ -80,10 +88,17 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
       key: "applications",
       label: "Applications to review",
       tone: "info",
-      items: input.newApplications ? [{ label: `${input.newApplications} new`, href: "/app/fundraisers?status=application" }] : [],
+      items: input.newApplications ? [{ label: `${input.newApplications} new`, href: "/app/applications" }] : [],
     },
     input.newApplications,
   );
+
+  add({
+    key: "product_deleted",
+    label: "Product deleted in Shopify while the fundraiser is running",
+    tone: "critical",
+    items: (input.deletedProducts ?? []).map((f) => ({ label: f.publicCode, href: link(f), detail: `"${f.product}" deleted; its sales are kept` })),
+  });
 
   // Not launched and starting within 3 days, or already started: it won't
   // become Active until someone approves the launch.
@@ -207,6 +222,29 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
     },
     (input.failedEmails ?? []).reduce((sum, f) => sum + f.count, 0),
   );
+
+  add({
+    key: "application_emails",
+    label: "Application emails failing",
+    tone: "critical",
+    items: (input.applicationEmailProblems ?? []).map((a) => ({ label: a.label, href: `/app/applications/${a.applicationId}`, detail: a.detail })),
+  });
+
+  add({
+    key: "drive",
+    label: "Drive folders failed (Retry on the fundraiser page)",
+    tone: "warning",
+    items: (input.driveFailures ?? []).map((f) => ({ label: f.publicCode, href: `${link(f)}#drive`, detail: f.error.slice(0, 80) })),
+  });
+
+  add({
+    key: "backup",
+    label: "Weekly payout backup to Drive failed",
+    tone: "critical",
+    items: input.backupFailure
+      ? [{ label: `Failed ${input.backupFailure.at.toISOString().slice(0, 10)}; retried hourly on Mondays`, href: "/app/reports", detail: input.backupFailure.error.slice(0, 80) }]
+      : [],
+  });
 
   const sync: QueueItem[] = [];
   if (input.failedWebhooks > 0) sync.push({ label: `${input.failedWebhooks} failed webhook${input.failedWebhooks === 1 ? "" : "s"}`, href: "/app#sync" });

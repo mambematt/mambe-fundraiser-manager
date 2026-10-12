@@ -41,7 +41,30 @@ export function describeAudit(row: AuditRow): string {
   }
   switch (row.action) {
     case "create":
-      return `${actor} created the fundraiser (${date(after.startDate)} – ${date(after.endDate)}, ${money(after.payoutRateCents)} per cape).`;
+      return after.startDate
+        ? `${actor} created the fundraiser (${date(after.startDate)} – ${date(after.endDate)}, ${money(after.payoutRateCents)} per cape).`
+        : `${actor} created the fundraiser in Setup (no dates yet, ${money(after.payoutRateCents)} per cape).`;
+    case "set_product":
+      return before.product ? `${actor} changed the product from "${before.product}" to "${after.product}".` : `${actor} linked the product "${after.product}".`;
+    case "set_dates_rate":
+      return `${actor} set the dates: ${date(after.startDate)} – ${date(after.endDate)}, ${money(after.payoutRateCents)} per cape.`;
+    case "from_application":
+      return `Created from application #${after.applicationId}.`;
+    case "drive:created":
+      return `${actor} created or confirmed the Drive folders.`;
+    case "drive:failed":
+      return `${actor} tried to create the Drive folders, but it failed: ${after.error}`;
+    // Applications (entity "application").
+    case "submitted":
+      return `Submitted through the form (emails: ${after.emails}).`;
+    case "spam":
+      return `${actor} marked it as spam.`;
+    case "declined":
+      return `${actor} declined it.${reason}`;
+    case "accepted":
+      return `${actor} accepted it and created ${after.fundraiser}.`;
+    case "email:retry":
+      return `${actor} queued the "${after.kind}" email again.`;
     case "change_dates_rate": {
       const parts: string[] = [];
       if (before.startDate !== after.startDate) parts.push(`start date ${date(before.startDate)} → ${date(after.startDate)}`);

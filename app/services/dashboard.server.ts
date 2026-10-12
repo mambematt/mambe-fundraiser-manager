@@ -7,6 +7,8 @@ import { buildWorkQueue, type QueueGroup } from "../lib/work-queue";
 import { isoDate } from "./fundraisers.server";
 import { webhookHealth } from "./jobs.server";
 import { outstandingPayoutCents, payoutSummary } from "./settlement.server";
+import { BACKUP_JOB } from "./backups.server";
+import { PRODUCT_NEEDED_STATUSES } from "./products.server";
 
 export interface NumberStrip {
   active: number;
@@ -128,5 +130,29 @@ export async function loadWorkQueue(db: PrismaClient, now = new Date()): Promise
     storefrontErrors: fundraisers
       .filter((f) => f.storefrontError)
       .map((f) => ({ id: f.id, publicCode: f.publicCode, error: f.storefrontError! })),
+    deletedProducts: (
+      await db.fundraiser.findMany({
+        where: { status: { in: [...PRODUCT_NEEDED_STATUSES] }, product: { deletedAt: { not: null } } },
+        include: { product: { select: { title: true } } },
+      })
+    ).map((f) => ({ id: f.id, publicCode: f.publicCode, product: f.product?.title ?? "" })),
+    applicationEmailProblems: (
+      await db.applicationEmail.findMany({
+        where: { OR: [{ status: "failed" }, { status: "pending", attempts: { gt: 0 } }] },
+        include: { application: { select: { organizationName: true } } },
+        orderBy: { id: "asc" },
+      })
+    ).map((e) => ({
+      applicationId: e.applicationId,
+      label: `#${e.applicationId} ${e.application.organizationName ?? ""}`.trim(),
+      detail: `${e.kind === "received" ? "applicant" : "internal"} email ${e.status === "failed" ? "failed" : "retrying"}`,
+    })),
+    driveFailures: fundraisers
+      .filter((f) => f.driveError)
+      .map((f) => ({ id: f.id, publicCode: f.publicCode, error: f.driveError! })),
+    backupFailure: await (async () => {
+      const last = await db.jobRun.findFirst({ where: { name: BACKUP_JOB, status: { not: "running" } }, orderBy: { startedAt: "desc" } });
+      return last?.status === "failed" ? { at: last.startedAt, error: last.error ?? "unknown error" } : null;
+    })(),
   });
 }

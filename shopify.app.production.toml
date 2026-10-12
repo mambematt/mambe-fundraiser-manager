@@ -16,6 +16,13 @@ scopes = "read_orders,read_all_orders,read_products,read_inventory,write_product
 [auth]
 redirect_urls = [ "https://mambe-fundraisers.onrender.com/auth/callback" ]
 
+# The storefront application form posts to /apps/fundraise/apply; Shopify signs
+# it and forwards it to /proxy/apply (app/routes/proxy.apply.tsx).
+[app_proxy]
+url = "https://mambe-fundraisers.onrender.com/proxy"
+subpath = "fundraise"
+prefix = "apps"
+
 [webhooks]
 # Matches the library's ApiVersion.October26 in app/shopify.server.ts.
 api_version = "2026-10"

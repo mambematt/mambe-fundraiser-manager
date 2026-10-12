@@ -9,6 +9,7 @@ import { flushAlerts } from "../services/alerts.server";
 import { nightlyIsDue, runClock, runNightlyRecheck, type JobResult } from "../services/jobs.server";
 import { shopifyClientForInstalledShop } from "../services/shopify-client.server";
 import { createKlaviyoClient } from "../services/klaviyo.server";
+import { createDriveClient } from "../services/drive.server";
 
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -25,7 +26,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // fundraiser's switches decide whether anything is actually written or sent.
   const shopify = await shopifyClientForInstalledShop().catch(() => null);
   const klaviyo = process.env.KLAVIYO_API_KEY ? createKlaviyoClient() : null;
-  const results: JobResult[] = [await runClock(db, new Date(), { shopify, klaviyo })];
+  const shop = (await db.session.findFirst({ where: { isOnline: false } }))?.shop ?? null;
+  let drive = null;
+  try {
+    drive = createDriveClient();
+  } catch {
+    // A malformed key shows on the fundraiser page when someone uses Drive.
+  }
+  const results: JobResult[] = [await runClock(db, new Date(), { shopify, klaviyo, drive, shop })];
 
   const force = new URL(request.url).searchParams.get("nightly") === "force";
   if (force || (await nightlyIsDue(db))) {

@@ -20,11 +20,13 @@ export default function App() {
       <s-app-nav>
         <s-link href="/app">Home</s-link>
         <s-link href="/app/fundraisers">Fundraisers</s-link>
+        <s-link href="/app/applications">Applications</s-link>
         <s-link href="/app/ready-to-pay">Ready to pay</s-link>
         <s-link href="/app/payouts">Payouts</s-link>
         <s-link href="/app/organizations">Organizations &amp; teams</s-link>
         <s-link href="/app/organizers">Organizers</s-link>
         <s-link href="/app/products">Products</s-link>
+        <s-link href="/app/reports">Reports</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

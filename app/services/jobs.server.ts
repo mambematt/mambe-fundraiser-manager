@@ -14,6 +14,9 @@ import { queueEmail, sendDueCommunications } from "./communications.server";
 import type { KlaviyoClient } from "./klaviyo.server";
 import { syncStorefront } from "./storefront.server";
 import { settleDue } from "./settlement.server";
+import { sendPendingApplicationEmails } from "./applications.server";
+import { backupIsDue, runPayoutBackup } from "./backups.server";
+import type { DriveClient } from "./drive.server";
 
 export type JobName = "clock" | "nightly";
 
@@ -63,6 +66,9 @@ async function runJob(
 export interface ClockDeps {
   shopify?: ShopifyClient | null;
   klaviyo?: KlaviyoClient | null;
+  drive?: DriveClient | null;
+  /** The installed shop's domain, for admin links in application emails. */
+  shop?: string | null;
 }
 
 export async function runClock(db: PrismaClient, now = new Date(), deps: ClockDeps = {}): Promise<JobResult> {
@@ -85,6 +91,10 @@ export async function runClock(db: PrismaClient, now = new Date(), deps: ClockDe
     // Settlement: at end + 10 days, full re-pull, then the draft payout and
     // Settling → Payout pending. A failed re-pull calculates nothing.
     if (deps.shopify) details.settlement = await settleDue(db, deps.shopify, now);
+    // Application emails: sent right after saving; anything that failed is retried here.
+    if (deps.klaviyo) details.applicationEmails = await sendPendingApplicationEmails(db, deps.klaviyo, { shop: deps.shop ?? null, now });
+    // Mondays: the accountant payout CSV to Drive _Backups (only once Drive is set up).
+    if (deps.drive && (await backupIsDue(db, now))) details.payoutBackup = await runPayoutBackup(db, deps.drive, now);
     return details;
   });
 }

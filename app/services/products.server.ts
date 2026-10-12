@@ -163,8 +163,17 @@ export async function markProductDeleted(
     after: { status: "DELETED" },
     actor: "shopify",
   });
+  // A running fundraiser losing its product needs someone now (spec gap,
+  // session 6). Its lines are kept; the work queue shows it in red.
+  const running = await db.fundraiser.findMany({ where: { productId: existing.id, status: { in: [...PRODUCT_NEEDED_STATUSES] } } });
+  for (const f of running) {
+    alert(`Product "${existing.title}" was deleted in Shopify while ${f.publicCode} is ${f.status}`, { fundraiserId: f.id, shopifyProductId });
+  }
   return "deleted";
 }
+
+/** Statuses where a deleted product needs attention (it still sells, settles or pays). */
+export const PRODUCT_NEEDED_STATUSES = ["scheduled", "active", "settling", "payout_pending"] as const;
 
 export async function lifetimeTotalsForProduct(
   db: PrismaClient,

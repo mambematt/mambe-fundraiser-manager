@@ -1,0 +1,191 @@
+{%- comment -%}
+  Fundraiser application form (spec "Organizer journey", step 1).
+  Add it to the page at /pages/fundraise: Online Store → Themes → Customize →
+  Pages → the "fundraise" template → Add block → Apps → Fundraiser application form.
+
+  It posts to /apps/fundraise/apply. Shopify's App Proxy signs the request and
+  forwards it to the Mambe Fundraisers app, which saves it first and then emails.
+  Required fields are checked here and again on the server.
+{%- endcomment -%}
+<div class="mambe-apply" id="mambe-apply-{{ block.id }}" {{ block.shopify_attributes }}>
+  {%- if block.settings.heading != blank -%}<h2 class="mambe-apply__heading">{{ block.settings.heading }}</h2>{%- endif -%}
+  {%- if block.settings.intro != blank -%}<div class="mambe-apply__intro">{{ block.settings.intro }}</div>{%- endif -%}
+
+  <form class="mambe-apply__form" action="/apps/fundraise/apply" method="post" novalidate>
+    <div class="mambe-apply__grid">
+      <label class="mambe-apply__field">
+        <span>Your name *</span>
+        <input type="text" name="name" autocomplete="name" maxlength="200" required>
+        <small class="mambe-apply__error" data-for="name"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>Email *</span>
+        <input type="email" name="email" autocomplete="email" inputmode="email" maxlength="200" required>
+        <small class="mambe-apply__error" data-for="email"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>Phone *</span>
+        <input type="tel" name="phone" autocomplete="tel" inputmode="tel" maxlength="40" required>
+        <small class="mambe-apply__error" data-for="phone"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>School or organization *</span>
+        <input type="text" name="organization" autocomplete="organization" maxlength="200" required>
+        <small class="mambe-apply__error" data-for="organizationName"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>Team or sport *</span>
+        <input type="text" name="team" placeholder="e.g. Girls Softball" maxlength="200" required>
+        <small class="mambe-apply__error" data-for="teamName"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>Your role *</span>
+        <input type="text" name="role" placeholder="e.g. Coach, booster president, parent" maxlength="200" required>
+        <small class="mambe-apply__error" data-for="role"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>City *</span>
+        <input type="text" name="city" autocomplete="address-level2" maxlength="100" required>
+        <small class="mambe-apply__error" data-for="city"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>State *</span>
+        <input type="text" name="state" autocomplete="address-level1" maxlength="40" required>
+        <small class="mambe-apply__error" data-for="state"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>When would you like to run it? *</span>
+        <select name="timing_month" required>
+          <option value="">Choose a month</option>
+          {%- assign months = "January,February,March,April,May,June,July,August,September,October,November,December" | split: "," -%}
+          {%- for m in months -%}<option value="{{ m }}">{{ m }}</option>{%- endfor -%}
+          <option value="Not sure yet">Not sure yet</option>
+        </select>
+        <small class="mambe-apply__error" data-for="timingMonth"></small>
+      </label>
+      <label class="mambe-apply__field">
+        <span>Your team's season *</span>
+        <select name="timing_season" required>
+          <option value="">Choose a season</option>
+          <option value="Fall">Fall</option>
+          <option value="Winter">Winter</option>
+          <option value="Spring">Spring</option>
+          <option value="Summer">Summer</option>
+        </select>
+        <small class="mambe-apply__error" data-for="timingSeason"></small>
+      </label>
+    </div>
+
+    <fieldset class="mambe-apply__field mambe-apply__logo">
+      <legend>Do you have a logo? *</legend>
+      <label><input type="radio" name="has_logo" value="yes" required> Yes</label>
+      <label><input type="radio" name="has_logo" value="no"> No</label>
+      <small class="mambe-apply__error" data-for="hasLogo"></small>
+    </fieldset>
+
+    <label class="mambe-apply__field">
+      <span>Anything else we should know? (optional)</span>
+      <textarea name="notes" rows="3" maxlength="2000"></textarea>
+    </label>
+
+    {%- comment -%} Spam checks: a field people never see, and when the page was opened. {%- endcomment -%}
+    <div class="mambe-apply__hp" aria-hidden="true">
+      <label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+    </div>
+    <input type="hidden" name="started_at" value="">
+
+    <p class="mambe-apply__status" role="alert"></p>
+    <button type="submit" class="mambe-apply__submit button">{{ block.settings.button | default: "Apply" }}</button>
+    <noscript><p>Please turn on JavaScript to send this form, or email {{ shop.email }}.</p></noscript>
+  </form>
+  <div class="mambe-apply__thanks" hidden></div>
+</div>
+
+<style>
+  .mambe-apply { max-width: 720px; margin: 0 auto; padding: 1rem 0; }
+  .mambe-apply__grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem 1rem; }
+  @media (min-width: 640px) { .mambe-apply__grid { grid-template-columns: 1fr 1fr; } }
+  .mambe-apply__field { display: flex; flex-direction: column; gap: 0.25rem; margin: 0 0 0.75rem; border: 0; padding: 0; }
+  .mambe-apply__field span, .mambe-apply__field legend { font-weight: 600; }
+  .mambe-apply__field input, .mambe-apply__field select, .mambe-apply__field textarea {
+    font: inherit; font-size: 16px; padding: 0.65rem 0.75rem; border: 1px solid #b5b5b5; border-radius: 6px; width: 100%; box-sizing: border-box; background: #fff;
+  }
+  .mambe-apply__logo label { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 1.5rem; font-size: 16px; }
+  .mambe-apply__error { color: #b42318; min-height: 0; }
+  .mambe-apply__field.is-invalid input, .mambe-apply__field.is-invalid select { border-color: #b42318; }
+  .mambe-apply__hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  .mambe-apply__submit { width: 100%; padding: 0.9rem; font-size: 1.05rem; cursor: pointer; }
+  @media (min-width: 640px) { .mambe-apply__submit { width: auto; min-width: 12rem; } }
+  .mambe-apply__status { color: #b42318; }
+  .mambe-apply__thanks { font-size: 1.15rem; padding: 1.5rem 0; }
+</style>
+
+<script>
+  (function () {
+    var root = document.getElementById("mambe-apply-{{ block.id }}");
+    if (!root) return;
+    var form = root.querySelector("form");
+    var status = root.querySelector(".mambe-apply__status");
+    var thanks = root.querySelector(".mambe-apply__thanks");
+    var button = root.querySelector(".mambe-apply__submit");
+    form.elements.started_at.value = String(Date.now());
+
+    function clearErrors() {
+      root.querySelectorAll(".mambe-apply__error").forEach(function (el) { el.textContent = ""; });
+      root.querySelectorAll(".is-invalid").forEach(function (el) { el.classList.remove("is-invalid"); });
+      status.textContent = "";
+    }
+    function showError(key, message) {
+      var el = root.querySelector('.mambe-apply__error[data-for="' + key + '"]');
+      if (el) { el.textContent = message; el.closest(".mambe-apply__field").classList.add("is-invalid"); }
+    }
+    function browserCheck() {
+      var ok = true;
+      var labels = { name: "name", email: "email", phone: "phone", organization: "organizationName", team: "teamName", role: "role", city: "city", state: "state", timing_month: "timingMonth", timing_season: "timingSeason" };
+      Object.keys(labels).forEach(function (name) {
+        var input = form.elements[name];
+        if (!input.value.trim() || (name === "email" && !input.checkValidity())) { showError(labels[name], "This is required."); ok = false; }
+      });
+      if (!form.querySelector('input[name="has_logo"]:checked')) { showError("hasLogo", "Please choose yes or no."); ok = false; }
+      return ok;
+    }
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      clearErrors();
+      if (!browserCheck()) { status.textContent = "Please fill in the highlighted fields."; return; }
+      button.disabled = true;
+      fetch(form.action, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: new URLSearchParams(new FormData(form)).toString(),
+      })
+        .then(function (res) { return res.json().catch(function () { return { ok: false }; }); })
+        .then(function (body) {
+          if (body && body.ok) {
+            form.hidden = true;
+            thanks.textContent = body.message || "Thanks. We'll be in touch within 2 business days.";
+            thanks.hidden = false;
+            thanks.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+          }
+          if (body && body.errors) Object.keys(body.errors).forEach(function (k) { showError(k, body.errors[k]); });
+          status.textContent = (body && body.message) || "Something went wrong. Please try again.";
+        })
+        .catch(function () { status.textContent = "We couldn't send that. Check your connection and try again."; })
+        .finally(function () { button.disabled = false; });
+    });
+  })();
+</script>
+
+{% schema %}
+{
+  "name": "Fundraiser application form",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Start a fundraiser" },
+    { "type": "richtext", "id": "intro", "label": "Intro", "default": "<p>Tell us about your team and we'll set up a custom blanket fundraiser.</p>" },
+    { "type": "text", "id": "button", "label": "Button text", "default": "Apply" }
+  ]
+}
+{% endschema %}

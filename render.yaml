@@ -62,6 +62,18 @@ services:
         sync: false
       - key: PORTAL_HELP_EMAIL
         sync: false
+      # Application form emails (session 6). Staging sends them, but only to
+      # KLAVIYO_TEST_RECIPIENT.
+      - key: APPLICATION_EMAILS_ENABLED
+        value: "true"
+      - key: APPLICATION_NOTIFY_EMAIL
+        value: matt@mambeblankets.com
+      # Google Drive (session 6): the service account's whole JSON key, and the
+      # "Fundraising (staging)" shared drive's ID.
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: DRIVE_SHARED_DRIVE_ID
+        sync: false
 
   - type: cron
     name: mambe-fundraisers-staging-cron
@@ -125,6 +137,17 @@ services:
         value: fundraise.mambeblankets.com
       - key: STOREFRONT_URL
         value: https://mambeblankets.com
+      # Application form emails: off until the owner turns them on (set to
+      # "true" in Render). Not set here so a Blueprint sync never flips it.
+      - key: APPLICATION_EMAILS_ENABLED
+        sync: false
+      - key: APPLICATION_NOTIFY_EMAIL
+        value: matt@mambeblankets.com
+      # Google Drive: the service account key and the "Fundraising" shared drive's ID.
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: DRIVE_SHARED_DRIVE_ID
+        sync: false
 
   - type: cron
     name: mambe-fundraisers-cron
