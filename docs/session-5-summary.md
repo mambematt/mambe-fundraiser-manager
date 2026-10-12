@@ -85,7 +85,7 @@ Completed Oct 11, 2026. Prompt: `docs/session-5-build-prompt.md`. Spec: `docs/SP
 - Render Postgres point-in-time recovery: **3 days** on the current (Hobby) workspace plan.
 - Manual logical backups are kept 7 days.
 - **Restore drill done** (see done criteria).
-- **Owner choice for later:** Pro workspace (7-day recovery), or a manual logical backup before each payout run. The spec's weekly payout CSV to Drive comes with the Drive integration.
+- **Owner decision (Oct 11):** take a **manual logical backup before each payout run** (Render → mambe-fundraisers-db → Recovery → Logical backups → Create backup; kept 7 days), rather than moving to the Pro plan. The app reminds you next to **Approve payout** and on **Ready to pay**. The spec's weekly payout CSV to Drive comes with the Drive integration.
 
 ## Assumptions I made (not settled by the spec)
 - **"Window end + 10 days"** is the window end (12:00 AM after the end date) plus 10 days in the fundraiser's timezone. NS-GSB-F26 (ends Nov 15) therefore settles at **Nov 26, 12:00 AM Pacific**, and its draft is ready that morning.
@@ -125,7 +125,7 @@ Completed Oct 11, 2026. Prompt: `docs/session-5-build-prompt.md`. Spec: `docs/SP
 - **Production NS-GSB-F26:** Active, 9 units ($225.00 estimated) as of Oct 11. Storefront items and Organizer emails are on.
 
 ## For Nov 26 (NS-GSB-F26 payout), in order
-1. **Confirm PayPal Payouts access** beforehand.
+1. **Confirm PayPal Payouts access** beforehand. On the day, start with a **manual logical backup** in Render (owner decision).
 2. **Open NS-GSB-F26 → Payout.** Resolve any new flags.
 3. **Do the cross-check** with the exact date range shown (first live payout: required). The spec also asks for the first 3 live payouts to be compared with a Shopify sales report; this check is that comparison.
 4. **Confirm the individual payee** (Trissy's personal PayPal, the owner's noted exception), unless a club account email has been provided. If so, update the payee email first.

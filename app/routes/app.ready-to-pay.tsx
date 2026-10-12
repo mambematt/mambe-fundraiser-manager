@@ -102,7 +102,8 @@ export default function ReadyToPay() {
           )}
           <s-paragraph>
             <s-text color="subdued">
-              Upload the file in PayPal: Business Tools → Make Payments → Payouts (needs Payouts access on your PayPal Business
+              Before paying: take a manual backup in Render (mambe-fundraisers-db → Recovery → Logical backups → Create backup).
+              Then upload the file in PayPal: Business Tools → Make Payments → Payouts (needs Payouts access on your PayPal Business
               account). Mambe pays any PayPal fee, so each row is the full amount. After PayPal sends, record each payment with its
               transaction ID on the fundraiser&apos;s page; that marks it Paid.
             </s-text>

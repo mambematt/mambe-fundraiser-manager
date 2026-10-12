@@ -176,12 +176,18 @@ export function PayoutSection({ view, publicCode, busy, dryRun }: { view: Payout
                       {p.unresolvedFlags.length > 0 && <s-link href="#flags">Go to the flags</s-link>}
                     </s-banner>
                   ) : (
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="approve" />
-                      <s-button type="submit" variant="primary" disabled={busy}>
-                        Approve payout of {dollars(p.finalCents)}
-                      </s-button>
-                    </Form>
+                    <s-stack gap="small">
+                      <s-text color="subdued">
+                        Before approving: take a manual backup in Render (mambe-fundraisers-db → Recovery → Logical backups → Create
+                        backup). It&apos;s kept 7 days.
+                      </s-text>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="approve" />
+                        <s-button type="submit" variant="primary" disabled={busy}>
+                          Approve payout of {dollars(p.finalCents)}
+                        </s-button>
+                      </Form>
+                    </s-stack>
                   )}
                 </>
               )}
