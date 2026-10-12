@@ -3,6 +3,7 @@
 
 import type { Fundraiser, PrismaClient } from "@prisma/client";
 import { UserError } from "../lib/errors";
+import { hasLaunchFields } from "../lib/launched";
 import {
   bannerValue,
   defaultBannerTeamName,
@@ -61,6 +62,7 @@ export async function setBannerTeamName(db: PrismaClient, id: number, name: stri
 export async function publishStorefront(db: PrismaClient, shopify: ShopifyClient, id: number, actor: string) {
   const f = await load(db, id);
   if (!f.storefrontEnabled) throw new UserError("Turn on Storefront items first.");
+  if (!hasLaunchFields(f)) throw new UserError("Link the product and set the dates first.");
   try {
     if (!f.shortLinkRedirectId) {
       const slug = slugFor(f);
@@ -94,7 +96,7 @@ export async function publishStorefront(db: PrismaClient, shopify: ShopifyClient
 /** Remove the banner field. Safe to repeat. The short link stays (old flyers keep working). */
 export async function clearBanner(db: PrismaClient, shopify: ShopifyClient, id: number, actor: string) {
   const f = await load(db, id);
-  if (f.bannerState === "off") return;
+  if (f.bannerState === "off" || !f.product) return; // never written without a product
   try {
     await shopify.clearProductBanner(f.product.shopifyProductId);
     await db.fundraiser.update({ where: { id }, data: { bannerState: "off", storefrontError: null, storefrontErrorAt: null } });

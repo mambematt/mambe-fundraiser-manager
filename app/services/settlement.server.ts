@@ -12,6 +12,7 @@ import type { Payout, Prisma, PrismaClient } from "@prisma/client";
 import { DateTime } from "luxon";
 import { fundraiserTotals } from "../lib/attribution";
 import { UserError } from "../lib/errors";
+import { hasLaunchFields, launched } from "../lib/launched";
 import { DEFAULT_TIMEZONE } from "../lib/window";
 import { alert, alertError } from "./alerts.server";
 import { writeAudit } from "./audit.server";
@@ -63,7 +64,7 @@ export function settlementDueAt(f: { windowEnd: Date; cancelledAt: Date | null; 
  */
 export async function fullRepull(db: PrismaClient, shopify: ShopifyClient, fundraiserId: number) {
   if (testSwitches().simulateRepullFailure) throw new Error("Simulated Shopify failure (staging test switch)");
-  const f = await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { product: true } });
+  const f = launched(await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { product: true } }));
   const since = new Date(f.windowStart.getTime() - DAY);
   const fromShopify = await shopify.listOrderIdsForProductSince(f.product.shopifyProductId, since);
   const held = await db.shopifyOrder.findMany({
@@ -160,6 +161,7 @@ export async function settleDue(db: PrismaClient, shopify: ShopifyClient, now = 
     orderBy: { id: "asc" },
   });
   for (const f of candidates) {
+    if (!hasLaunchFields(f)) continue; // type guard: a launched fundraiser always has dates
     if (now < settlementDueAt(f)) continue;
     try {
       const { ordersRead, missing } = await fullRepull(db, shopify, f.id);
@@ -432,7 +434,7 @@ export async function reopenPayout(db: PrismaClient, payoutId: number, reason: s
     });
   });
   // Lines may have changed while frozen; bring them up to date.
-  const f = await db.fundraiser.findUniqueOrThrow({ where: { id: payout.fundraiserId }, include: { product: true } });
+  const f = launched(await db.fundraiser.findUniqueOrThrow({ where: { id: payout.fundraiserId }, include: { product: true } }));
   await reattributeProduct(db, f.product.shopifyProductId);
   await refreshDraft(db, payoutId);
 }

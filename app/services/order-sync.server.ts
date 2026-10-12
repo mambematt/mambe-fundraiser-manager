@@ -17,6 +17,7 @@ import {
 } from "../lib/attribution";
 import { normalizeOrder, type NormalizedLine, type NormalizedOrder } from "../lib/shopify-order";
 import type { ShopifyClient } from "./shopify-api.server";
+import { hasLaunchFields } from "../lib/launched";
 import { writeAudit } from "./audit.server";
 import { notePostFreezeChange } from "./payout-changes.server";
 import { attributionOptions } from "./settings.server";
@@ -160,7 +161,8 @@ export async function loadFundraisersForProducts(
     where: { status: { not: "declined" }, product: { shopifyProductId: { in: shopifyProductIds } } },
     include: { product: { select: { shopifyProductId: true } } },
   });
-  return fundraisers.map((f) => ({
+  // A fundraiser without dates yet has no window, so it can't claim a sale.
+  return fundraisers.filter(hasLaunchFields).map((f) => ({
     id: f.id,
     shopifyProductId: f.product.shopifyProductId,
     status: f.status,

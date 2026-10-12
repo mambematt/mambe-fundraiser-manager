@@ -5,6 +5,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { DateTime } from "luxon";
+import { launched } from "../lib/launched";
 import { toCsv } from "../lib/payout-files";
 
 const DAY = 24 * 3600 * 1000;
@@ -24,7 +25,7 @@ export interface EdgeOrder {
 }
 
 export async function crosscheckData(db: PrismaClient, fundraiserId: number, storeTimezone: string) {
-  const f = await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { product: true } });
+  const f = launched(await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId }, include: { product: true } }));
   const zone = f.timezone;
   const qualifyingLines = await db.orderLineItem.findMany({
     where: { attributedFundraiserId: fundraiserId, outcome: "qualifying" },

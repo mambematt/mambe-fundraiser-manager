@@ -59,14 +59,16 @@ model Organization {
 }
 
 model Team {
-  id             Int      @id @default(autoincrement())
-  organizationId Int      @map("organization_id")
-  name           String // "Girls Lacrosse"
-  sport          String?
-  level          String?
-  driveFolderId  String?  @map("drive_folder_id")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                   Int      @id @default(autoincrement())
+  organizationId       Int      @map("organization_id")
+  name                 String // "Girls Lacrosse"
+  sport                String?
+  level                String?
+  driveFolderId        String?  @map("drive_folder_id")
+  // "_Product & Artwork": created once per team, reused every season.
+  driveArtworkFolderId String?  @map("drive_artwork_folder_id")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id])
   products     Product[]
@@ -133,17 +135,19 @@ model Fundraiser {
   id          Int     @id @default(autoincrement())
   publicCode  String  @unique @map("public_code") // e.g. CHS-GLAX-F26
   teamId      Int     @map("team_id")
-  productId   Int     @map("product_id")
+  // Product and dates are optional while in Setup (a fundraiser created from
+  // an application has neither yet); launch requires both.
+  productId   Int?    @map("product_id")
   seasonLabel String? @map("season_label")
 
   // Calendar dates in the fundraiser's timezone. The window below is computed
   // from these by app/lib/window.ts and nothing else.
-  startDate   DateTime @map("start_date") @db.Date
-  endDate     DateTime @map("end_date") @db.Date
-  timezone    String   @default("America/Los_Angeles")
+  startDate   DateTime? @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  timezone    String    @default("America/Los_Angeles")
   // Half-open [window_start, window_end) in UTC.
-  windowStart DateTime @map("window_start") @db.Timestamptz(3)
-  windowEnd   DateTime @map("window_end") @db.Timestamptz(3)
+  windowStart DateTime? @map("window_start") @db.Timestamptz(3)
+  windowEnd   DateTime? @map("window_end") @db.Timestamptz(3)
 
   payoutRateCents Int    @default(2500) @map("payout_rate_cents") // copied in at creation
   status          String @default("setup") // allowed transitions live in code
@@ -188,7 +192,12 @@ model Fundraiser {
   settlementError        String?   @map("settlement_error") // "Re-pull failed: …" while it keeps failing
   settlementErrorAt      DateTime? @map("settlement_error_at") @db.Timestamptz(3)
   paypalPayeeEmail       String?   @map("paypal_payee_email") // the organization's account
+  // Drive (session 6): {Year Season}/ and its two subfolders, by stored ID.
   driveFolderId          String?   @map("drive_folder_id")
+  driveAssetsFolderId    String?   @map("drive_assets_folder_id")
+  driveInternalFolderId  String?   @map("drive_internal_folder_id")
+  driveError             String?   @map("drive_error") // last failure, cleared on success
+  driveErrorAt           DateTime? @map("drive_error_at") @db.Timestamptz(3)
   cancelledAt            DateTime? @map("cancelled_at") @db.Timestamptz(3)
   cancelReason           String?   @map("cancel_reason")
   notes                  String?
@@ -196,7 +205,7 @@ model Fundraiser {
   updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   team           Team                  @relation(fields: [teamId], references: [id])
-  product        Product               @relation(fields: [productId], references: [id])
+  product        Product?              @relation(fields: [productId], references: [id])
   organizers     FundraiserOrganizer[]
   lineItems      OrderLineItem[]
   payout         Payout?
@@ -210,27 +219,61 @@ model Fundraiser {
 }
 
 model Application {
-  id                    Int      @id @default(autoincrement())
-  rawSubmission         Json     @map("raw_submission") // kept forever
+  id                    Int       @id @default(autoincrement())
+  rawSubmission         Json      @map("raw_submission") // kept forever
   name                  String?
   email                 String?
   phone                 String?
-  organizationName      String?  @map("organization_name")
-  teamName              String?  @map("team_name")
+  organizationName      String?   @map("organization_name")
+  teamName              String?   @map("team_name")
   role                  String?
   city                  String?
   state                 String?
-  roughTiming           String?  @map("rough_timing")
-  hasLogo               Boolean? @map("has_logo")
-  status                String   @default("new") // new | converted | declined | spam
-  convertedFundraiserId Int?     @map("converted_fundraiser_id")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  roughTiming           String?   @map("rough_timing")
+  hasLogo               Boolean?  @map("has_logo")
+  notes                 String?
+  status                String    @default("new") // new | converted | declined | spam
+  convertedFundraiserId Int?      @map("converted_fundraiser_id")
+  declineReason         String?   @map("decline_reason")
+  reviewedBy            String?   @map("reviewed_by")
+  reviewedAt            DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  convertedFundraiser Fundraiser? @relation(fields: [convertedFundraiserId], references: [id])
+  convertedFundraiser Fundraiser?        @relation(fields: [convertedFundraiserId], references: [id])
+  emails              ApplicationEmail[]
 
   @@index([status])
   @@map("applications")
+}
+
+// The two application emails (applicant + internal). Saved with the
+// application and sent afterwards, so a Klaviyo failure never loses one.
+model ApplicationEmail {
+  id            Int       @id @default(autoincrement())
+  applicationId Int       @map("application_id")
+  kind          String // received | internal
+  status        String    @default("pending") // pending | sent | failed | off (switch was off)
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(3)
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(3)
+  error         String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  application Application @relation(fields: [applicationId], references: [id])
+
+  @@unique([applicationId, kind])
+  @@index([status])
+  @@map("application_emails")
+}
+
+// Small app-wide values, e.g. the Drive _Backups folder ID.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("app_settings")
 }
 
 // Minimal copy of a Shopify order. No customer names, emails or addresses.

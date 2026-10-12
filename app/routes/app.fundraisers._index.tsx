@@ -13,7 +13,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const status = isStatus(statusParam) ? statusParam : null;
   const fundraisers = await db.fundraiser.findMany({
     where: status ? { status } : {},
-    orderBy: [{ windowStart: "desc" }],
+    orderBy: [{ windowStart: { sort: "desc", nulls: "first" } }, { id: "desc" }],
     include: { team: { include: { organization: true } }, product: true },
   });
   return {
@@ -25,8 +25,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           id: f.id,
           publicCode: f.publicCode,
           team: `${f.team.organization.name} – ${f.team.name}`,
-          product: f.product.title,
-          dates: `${calendarDate(f.startDate)} – ${calendarDate(f.endDate)}`,
+          product: f.product?.title ?? "Not linked yet",
+          dates: f.startDate && f.endDate ? `${calendarDate(f.startDate)} – ${calendarDate(f.endDate)}` : "Not set yet",
           status: STATUS_LABELS[f.status as FundraiserStatus] ?? f.status,
           units: totals.qualifyingUnits,
           payout: dollars(totals.estimatedPayoutCents),

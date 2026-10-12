@@ -5,6 +5,8 @@ import { CHECKLIST_ITEMS, type ChecklistState } from "./checklist";
 
 export interface LaunchFacts {
   checklist: ChecklistState;
+  /** False while no product is linked (optional in Setup). Defaults to true. */
+  hasProduct?: boolean;
   productStatus: string; // Shopify status: ACTIVE, DRAFT, ARCHIVED, DELETED
   productDeleted: boolean;
   hasDates: boolean;
@@ -23,7 +25,9 @@ export function launchBlockers(facts: LaunchFacts): string[] {
   for (const item of CHECKLIST_ITEMS) {
     if (!facts.checklist[item.key].at) blockers.push(`Checklist: "${item.label}" isn't done.`);
   }
-  if (facts.productDeleted || facts.productStatus !== "ACTIVE") {
+  if (facts.hasProduct === false) {
+    blockers.push("No product is linked yet.");
+  } else if (facts.productDeleted || facts.productStatus !== "ACTIVE") {
     blockers.push(
       `The product is ${facts.productDeleted ? "deleted" : facts.productStatus.toLowerCase()} in Shopify; it must be active.`,
     );

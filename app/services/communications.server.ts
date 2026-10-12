@@ -10,6 +10,7 @@ import { DateTime } from "luxon";
 import { PORTAL_HELP_EMAIL } from "../content/portal-copy";
 import { dayStatus, todayPacific } from "../lib/calendar";
 import { UserError } from "../lib/errors";
+import { hasLaunchFields, launched } from "../lib/launched";
 import { planReminders, SEND_GRACE_MS } from "../lib/reminders";
 import { defaultBannerTeamName } from "../lib/storefront";
 import { alert } from "./alerts.server";
@@ -50,7 +51,7 @@ export function storefrontUrl(env: NodeJS.ProcessEnv = process.env): string {
 export async function planCommunications(db: PrismaClient, fundraiserId: number, now = new Date()) {
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id: fundraiserId } });
   await db.communication.deleteMany({ where: { fundraiserId, status: "scheduled", kind: { in: PLANNED_KINDS } } });
-  if (!f.emailsEnabled || !EMAIL_STATUSES.has(f.status)) return [];
+  if (!f.emailsEnabled || !EMAIL_STATUSES.has(f.status) || !hasLaunchFields(f)) return [];
 
   const existing = await db.communication.findMany({ where: { fundraiserId, kind: { in: PLANNED_KINDS }, status: { in: ["sent", "skipped_past_due", "failed"] } } });
   const done = new Set(existing.map((c) => `${c.kind}:${c.reminderNumber ?? ""}`));
@@ -92,10 +93,12 @@ export async function setEmailsEnabled(db: PrismaClient, id: number, enabled: bo
 
 /** The properties every email gets, so Klaviyo templates can use any of them. */
 export async function emailProperties(db: PrismaClient, fundraiserId: number, now = new Date()) {
-  const f = await db.fundraiser.findUniqueOrThrow({
-    where: { id: fundraiserId },
-    include: { team: { include: { organization: true } }, product: { select: { handle: true } }, payout: true },
-  });
+  const f = launched(
+    await db.fundraiser.findUniqueOrThrow({
+      where: { id: fundraiserId },
+      include: { team: { include: { organization: true } }, product: { select: { handle: true } }, payout: true },
+    }),
+  );
   const totals = await storedTotals(db, f);
   const startDate = isoDate(f.startDate);
   const endDate = isoDate(f.endDate);

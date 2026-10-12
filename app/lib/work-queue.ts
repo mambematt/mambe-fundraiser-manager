@@ -14,9 +14,9 @@ export interface QueueFundraiser {
   publicCode: string;
   status: string;
   /** "YYYY-MM-DD" */
-  startDate: string;
-  endDate: string;
-  windowEnd: Date;
+  startDate: string | null; // null until dates are set in Setup
+  endDate: string | null;
+  windowEnd: Date | null;
   waitingOnOrganizerSince: Date | null;
 }
 
@@ -66,6 +66,9 @@ const link = (f: { id: number }) => `/app/fundraisers/${f.id}`;
 
 export function buildWorkQueue(input: QueueInput): QueueGroup[] {
   const { now } = input;
+  const dated = input.fundraisers.filter(
+    (f): f is QueueFundraiser & { startDate: string; endDate: string; windowEnd: Date } => !!f.startDate && !!f.endDate && !!f.windowEnd,
+  );
   const today = todayPacific(now);
   const groups: QueueGroup[] = [];
   const add = (g: Omit<QueueGroup, "count">, count = g.items.length) => {
@@ -89,7 +92,7 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
     key: "launch_soon",
     label: `Starting within ${LAUNCH_SOON_DAYS} days (or already started) but not yet Scheduled`,
     tone: "critical",
-    items: input.fundraisers
+    items: dated
       .filter((f) => NOT_LAUNCHED.has(f.status) && f.startDate <= launchBy && f.endDate >= today)
       .sort((a, b) => a.startDate.localeCompare(b.startDate))
       .map((f) => ({ label: f.publicCode, href: link(f), detail: f.startDate < today ? `started ${f.startDate}` : `starts ${f.startDate}` })),
@@ -114,7 +117,7 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
     key: "ending_soon",
     label: `Ending in the next ${ENDING_SOON_DAYS} days`,
     tone: "info",
-    items: input.fundraisers
+    items: dated
       .filter((f) => (f.status === "active" || f.status === "scheduled") && f.endDate >= today && f.endDate <= endBy)
       .sort((a, b) => a.endDate.localeCompare(b.endDate))
       .map((f) => ({ label: f.publicCode, href: link(f), detail: `ends ${f.endDate}` })),
@@ -138,7 +141,7 @@ export function buildWorkQueue(input: QueueInput): QueueGroup[] {
     key: "settlements",
     label: "Settlements ready",
     tone: "info",
-    items: input.fundraisers
+    items: dated
       .filter((f) => f.status === "settling" && f.windowEnd.getTime() <= settleCutoff)
       .map((f) => ({ label: f.publicCode, href: link(f), detail: `ended ${f.endDate}` })),
   });

@@ -23,6 +23,7 @@ import {
   launchBlockersFor,
   previewDatesRateChange,
   setChecklistItem,
+  setFundraiserProduct,
   setOrganizers,
   setWaitingOnOrganizer,
   storedTotals,
@@ -103,22 +104,34 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!f) throw new Response("Not found", { status: 404 });
 
   // Sales near the window that didn't land in it: 30 days either side.
-  const outsideWhere = {
-    shopifyProductId: f.product.shopifyProductId,
-    outcome: "non_fundraiser",
-    order: { processedAt: { gte: new Date(f.windowStart.getTime() - 30 * DAY), lte: new Date(f.windowEnd.getTime() + 30 * DAY) } },
-  };
+  // (None until both the product and dates are set.)
+  const outsideWhere =
+    f.product && f.windowStart && f.windowEnd
+      ? {
+          shopifyProductId: f.product.shopifyProductId,
+          outcome: "non_fundraiser",
+          order: { processedAt: { gte: new Date(f.windowStart.getTime() - 30 * DAY), lte: new Date(f.windowEnd.getTime() + 30 * DAY) } },
+        }
+      : null;
   const lineInclude = { order: { select: { name: true, shopifyOrderId: true, processedAt: true } } } as const;
 
-  const [totals, attributed, outside, allOrganizers, history, blockers, lockedReason, communications] = await Promise.all([
+  const [totals, attributed, outside, allOrganizers, history, blockers, lockedReason, communications, productChoices] = await Promise.all([
     storedTotals(db, f),
     db.orderLineItem.findMany({ where: { attributedFundraiserId: id }, include: lineInclude, orderBy: { order: { processedAt: "desc" } } }),
-    db.orderLineItem.findMany({ where: outsideWhere, include: lineInclude, orderBy: { order: { processedAt: "desc" } } }),
+    outsideWhere ? db.orderLineItem.findMany({ where: outsideWhere, include: lineInclude, orderBy: { order: { processedAt: "desc" } } }) : [],
     db.organizer.findMany({ orderBy: { name: "asc" } }),
     db.auditLog.findMany({ where: { entity: "fundraiser", entityId: String(id) }, orderBy: { id: "desc" }, take: 100 }),
     f.status === "setup" ? launchBlockersFor(db, id) : Promise.resolve([]),
     decisionsLockedReason(db, id),
     db.communication.findMany({ where: { fundraiserId: id }, orderBy: [{ scheduledFor: "asc" }, { id: "asc" }] }),
+    // Products this fundraiser may use (chosen in Setup): live, and unclaimed or this team's.
+    f.status === "setup"
+      ? db.product.findMany({
+          where: { deletedAt: null, status: { notIn: ["ARCHIVED", "DELETED"] }, OR: [{ teamId: null }, { teamId: f.teamId }] },
+          orderBy: { title: "asc" },
+          select: { id: true, title: true, status: true },
+        })
+      : [],
   ]);
 
   const row = (l: (typeof attributed)[number]) => ({
@@ -147,6 +160,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const checklist = checklistFrom(f);
   const startDate = isoDate(f.startDate);
   const endDate = isoDate(f.endDate);
+  const dated = !!(startDate && endDate && f.windowStart && f.windowEnd);
 
   return {
     f: {
@@ -156,17 +170,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       statusLabel: STATUS_LABELS[f.status as FundraiserStatus] ?? f.status,
       organization: `${f.team.organization.name} (${f.team.organization.type})`,
       team: f.team.name,
-      product: f.product.title,
-      productStatus: f.product.status,
-      productAdminUrl: adminProductUrl(f.product.shopifyProductId),
-      productStoreUrl: storefrontProductUrl(session.shop, f.product.handle),
+      productId: f.productId,
+      product: f.product?.title ?? null,
+      productStatus: f.product?.status ?? null,
+      productAdminUrl: f.product ? adminProductUrl(f.product.shopifyProductId) : null,
+      productStoreUrl: f.product ? storefrontProductUrl(session.shop, f.product.handle) : null,
       seasonLabel: f.seasonLabel ?? "",
       startDate,
       endDate,
-      dayStatus: dayStatus(startDate, endDate, new Date()),
+      dayStatus: startDate && endDate ? dayStatus(startDate, endDate, new Date()) : "Dates not set yet",
       timezoneLabel: TIMEZONES.find(([z]) => z === f.timezone)?.[1] ?? f.timezone,
-      windowStart: f.windowStart.toISOString(),
-      windowEnd: f.windowEnd.toISOString(),
+      windowStart: f.windowStart?.toISOString() ?? null,
+      windowEnd: f.windowEnd?.toISOString() ?? null,
       payoutRateCents: f.payoutRateCents,
       paypalPayeeEmail: f.paypalPayeeEmail ?? "",
       notes: f.notes ?? "",
@@ -216,7 +231,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
     emails: {
       enabled: f.emailsEnabled,
-      plannedIfOn: planReminders(startDate, endDate, f.timezone).map((p) => ({ label: p.kind === "final" ? "Final 3 days" : `Reminder ${p.reminderNumber}`, at: p.scheduledFor.toISOString() })),
+      plannedIfOn: (startDate && endDate ? planReminders(startDate, endDate, f.timezone) : []).map((p) => ({ label: p.kind === "final" ? "Final 3 days" : `Reminder ${p.reminderNumber}`, at: p.scheduledFor.toISOString() })),
       rows: communications.map((c) => ({
         id: c.id,
         label: c.kind === "reminder" ? `Reminder ${c.reminderNumber}` : ({ final: "Final 3 days", launch: "Launch", ended: "Ended", portal_ready: "Portal ready", paid: "Payout sent" } as Record<string, string>)[c.kind] ?? c.kind,
@@ -230,13 +245,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
     allOrganizers: allOrganizers.map((o) => ({ id: o.id, label: `${o.name} (${o.email})` })),
     history: history.map((h) => ({ id: String(h.id), at: h.createdAt.toISOString(), text: describeAudit(h) })),
-    payoutView: await loadPayoutView(
-      db,
-      id,
-      (await db.payout.findUnique({ where: { fundraiserId: id } }))?.status === "draft"
-        ? await (await shopifyClientForShop(session.shop)).fetchShopTimezone().catch(() => "America/Los_Angeles")
-        : null,
-    ),
+    productChoices,
+    // Settlement needs a window, so no payout section until dates are set.
+    payoutView: dated
+      ? await loadPayoutView(
+          db,
+          id,
+          (await db.payout.findUnique({ where: { fundraiserId: id } }))?.status === "draft"
+            ? await (await shopifyClientForShop(session.shop)).fetchShopTimezone().catch(() => "America/Los_Angeles")
+            : null,
+        )
+      : null,
   };
 };
 
@@ -286,6 +305,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       case "portalReady": {
         const f = await db.fundraiser.findUniqueOrThrow({ where: { id } });
         if (!f.emailsEnabled) throw new UserError("Turn on Organizer emails first.");
+        if (!f.startDate || !f.productId) throw new UserError("Link the product and set the dates first; the email shows them.");
         const row = await queueEmail(db, id, "portal_ready");
         const result = await sendCommunication(db, klaviyoOrThrow(), row, actor);
         if (result !== "sent") throw new UserError("Klaviyo didn't accept it; see the Communications log.");
@@ -367,6 +387,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         if (intent === "addAsset") await addAsset(db, id, input, actor);
         else await replaceAsset(db, Number(formText(form, "assetId")), input, actor);
         return { ok: true, message: intent === "addAsset" ? "Asset added." : "Asset replaced." };
+      }
+      case "setProduct": {
+        const productId = formInt(form, "productId");
+        if (!productId) throw new UserError("Choose a product.");
+        await setFundraiserProduct(db, id, productId, actor);
+        return { ok: true, message: "Product saved." };
       }
       case "notes": {
         const f = await db.fundraiser.findUniqueOrThrow({ where: { id } });
@@ -504,7 +530,8 @@ export default function FundraiserPage() {
             <s-text>· {f.organization}</s-text>
           </s-stack>
           <s-paragraph>
-            {calendarDate(f.startDate)} – {calendarDate(f.endDate)} ({f.timezoneLabel}) · <s-text type="strong">{f.dayStatus}</s-text>
+            {f.startDate && f.endDate ? `${calendarDate(f.startDate)} – ${calendarDate(f.endDate)} (${f.timezoneLabel}) · ` : "No dates yet (set them below) · "}
+            <s-text type="strong">{f.dayStatus}</s-text>
             {f.cancelledAt && ` · Cancelled ${pacific(f.cancelledAt)}: ${f.cancelReason}`}
           </s-paragraph>
           <s-paragraph>
@@ -515,12 +542,33 @@ export default function FundraiserPage() {
             {dollars(f.payoutRateCents)} per cape · PayPal payee: {f.paypalPayeeEmail || "not set"}
             {primary && f.paypalPayeeEmail && f.paypalPayeeEmail === primary.email ? " (the organizer's own email)" : ""}
           </s-paragraph>
-          <s-paragraph>
-            Product: {f.product}
-            {f.productStatus !== "ACTIVE" && ` (${f.productStatus.toLowerCase()} in Shopify)`} ·{" "}
-            <s-link href={f.productAdminUrl} target="_blank">Open in Shopify admin</s-link> ·{" "}
-            <s-link href={f.productStoreUrl} target="_blank">View on store</s-link>
-          </s-paragraph>
+          {f.product && f.productAdminUrl && f.productStoreUrl ? (
+            <s-paragraph>
+              Product: {f.product}
+              {f.productStatus !== "ACTIVE" && ` (${f.productStatus?.toLowerCase()} in Shopify)`} ·{" "}
+              <s-link href={f.productAdminUrl} target="_blank">Open in Shopify admin</s-link> ·{" "}
+              <s-link href={f.productStoreUrl} target="_blank">View on store</s-link>
+            </s-paragraph>
+          ) : (
+            <s-paragraph>Product: not linked yet.</s-paragraph>
+          )}
+          {f.status === "setup" && (
+            <Form method="post">
+              <input type="hidden" name="intent" value="setProduct" />
+              <s-stack direction="inline" gap="base" alignItems="end">
+                <s-select name="productId" label={f.product ? "Change the product" : "Link the product"} value={f.productId ? String(f.productId) : ""}>
+                  <s-option value="">Choose a product…</s-option>
+                  {data.productChoices.map((p) => (
+                    <s-option key={p.id} value={String(p.id)}>
+                      {p.title}
+                      {p.status !== "ACTIVE" ? ` (${p.status.toLowerCase()})` : ""}
+                    </s-option>
+                  ))}
+                </s-select>
+                <s-button type="submit" disabled={busy}>Save product</s-button>
+              </s-stack>
+            </Form>
+          )}
           <Form method="post">
             <input type="hidden" name="intent" value="notes" />
             <s-stack direction="inline" gap="base" alignItems="end">
@@ -737,7 +785,7 @@ export default function FundraiserPage() {
         </s-stack>
       </s-section>
 
-      <s-section heading="Change dates or rate">
+      <s-section heading={f.startDate ? "Change dates or rate" : "Set dates and rate"}>
         {!f.canEditDates ? (
           <s-paragraph>Dates and rate are locked once a fundraiser is {f.statusLabel}.</s-paragraph>
         ) : (
@@ -746,8 +794,8 @@ export default function FundraiserPage() {
               <input type="hidden" name="intent" value="previewDates" />
               <s-stack gap="base">
                 <s-stack direction="inline" gap="base">
-                  <s-date-field name="startDate" label="Start date" defaultValue={preview?.after.startDate ?? f.startDate} required />
-                  <s-date-field name="endDate" label="End date" defaultValue={preview?.after.endDate ?? f.endDate} required />
+                  <s-date-field name="startDate" label="Start date" defaultValue={preview?.after.startDate ?? f.startDate ?? ""} required />
+                  <s-date-field name="endDate" label="End date" defaultValue={preview?.after.endDate ?? f.endDate ?? ""} required />
                   <s-text-field
                     name="payoutRate"
                     label="Payout per cape ($)"
@@ -755,7 +803,7 @@ export default function FundraiserPage() {
                     required
                   />
                 </s-stack>
-                <s-text-field name="reason" label="Reason for the change" defaultValue={result?.reason ?? ""} />
+                {f.startDate && <s-text-field name="reason" label="Reason for the change" defaultValue={result?.reason ?? ""} />}
                 <s-button type="submit" disabled={busy}>Preview change</s-button>
               </s-stack>
             </Form>
@@ -774,8 +822,10 @@ export default function FundraiserPage() {
                     <input type="hidden" name="endDate" value={preview.after.endDate} />
                     <input type="hidden" name="payoutRate" value={(preview.after.payoutRateCents / 100).toFixed(2)} />
                     <s-stack direction="inline" gap="base" alignItems="end">
-                      <s-text-field name="reason" label="Reason (required)" defaultValue={result?.reason ?? ""} required />
-                      <s-button type="submit" variant="primary" disabled={busy}>Save change</s-button>
+                      {preview.before.startDate ? (
+                        <s-text-field name="reason" label="Reason (required)" defaultValue={result?.reason ?? ""} required />
+                      ) : null}
+                      <s-button type="submit" variant="primary" disabled={busy}>{preview.before.startDate ? "Save change" : "Save dates"}</s-button>
                     </s-stack>
                   </Form>
                 )}
@@ -1003,12 +1053,14 @@ export default function FundraiserPage() {
         </s-stack>
       </s-section>
 
-      <PayoutSection
-        view={data.payoutView}
-        publicCode={f.publicCode}
-        busy={busy}
-        dryRun={(result as { dryRun?: { ordersRead: number; units: number; amountCents: number; unresolvedFlags: number } } | undefined)?.dryRun ?? null}
-      />
+      {data.payoutView && (
+        <PayoutSection
+          view={data.payoutView}
+          publicCode={f.publicCode}
+          busy={busy}
+          dryRun={(result as { dryRun?: { ordersRead: number; units: number; amountCents: number; unresolvedFlags: number } } | undefined)?.dryRun ?? null}
+        />
+      )}
 
       <s-section heading="History">
         {history.length === 0 ? (

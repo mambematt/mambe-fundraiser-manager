@@ -5,6 +5,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { STATUS_MESSAGES, suggestedAction, PORTAL_HELP_EMAIL } from "../content/portal-copy";
 import { DateTime } from "luxon";
+import { hasLaunchFields } from "../lib/launched";
 import { dayStatus, daysBetween, todayPacific } from "../lib/calendar";
 import { settlementDueAt } from "./settlement.server";
 import { hashKey, hashToken, newToken } from "../lib/portal-tokens.server";
@@ -187,7 +188,7 @@ export async function fundraisersForOrganizer(db: PrismaClient, organizerId: num
   return db.fundraiser.findMany({
     where: { organizers: { some: { organizerId } }, status: { notIn: ["declined"] } },
     include: { team: { include: { organization: true } } },
-    orderBy: { windowStart: "desc" },
+    orderBy: [{ windowStart: { sort: "desc", nulls: "first" } }, { id: "desc" }],
   });
 }
 
@@ -239,6 +240,32 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
   if (!f) return null;
 
   const totals = await storedTotals(db, f);
+  const ratePerItem = `${(f.payoutRateCents / 100).toFixed(f.payoutRateCents % 100 ? 2 : 0)}`;
+  if (!hasLaunchFields(f)) {
+    // Still in Setup without dates: nothing to count yet.
+    return {
+      id: f.id,
+      publicCode: f.publicCode,
+      organization: f.team.organization.name,
+      team: f.team.name,
+      status: f.status,
+      statusLabel: STATUS_LABELS[f.status as FundraiserStatus] ?? f.status,
+      statusMessage: STATUS_MESSAGES[f.status] ?? "",
+      startDate: "To be set",
+      endDate: "To be set",
+      dayStatus: "We're setting up your dates.",
+      shortLink: null,
+      units: 0,
+      estimatedRaised: "$0.00",
+      finalAmount: null,
+      ratePerItem,
+      dataAsOf: null,
+      suggestion: null,
+      assets: f.assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url ?? "" })),
+      payoutStatus: "",
+      helpEmail: PORTAL_HELP_EMAIL,
+    };
+  }
   // Any webhook (even for orders without a linked product) shows the sync is live.
   const lastWebhook = await db.webhookEvent.findFirst({ orderBy: { receivedAt: "desc" } });
   const startDate = isoDate(f.startDate);
@@ -275,7 +302,7 @@ export async function portalView(db: PrismaClient, fundraiserId: number, organiz
     units: payout && payout.status !== "draft" ? payout.qualifyingUnits : totals.qualifyingUnits,
     estimatedRaised: `$${(totals.estimatedPayoutCents / 100).toFixed(2)}`,
     finalAmount: finalCents !== null ? money(finalCents) : null,
-    ratePerItem: `$${(f.payoutRateCents / 100).toFixed(f.payoutRateCents % 100 ? 2 : 0)}`,
+    ratePerItem,
     dataAsOf: lastWebhook?.receivedAt.toISOString() ?? null,
     suggestion: suggestedAction({ status: f.status, day, daysLeft }),
     assets: f.assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url ?? "" })),

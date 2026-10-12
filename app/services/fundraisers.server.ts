@@ -17,6 +17,7 @@ import {
 } from "../lib/status";
 import { computeWindow, DEFAULT_TIMEZONE, effectiveWindow, type TimeWindow } from "../lib/window";
 import { UserError } from "../lib/errors";
+import { hasLaunchFields } from "../lib/launched";
 import { writeAudit } from "./audit.server";
 import { loadFundraisersForProducts, reattributeProduct, runEngineOnOrder } from "./order-sync.server";
 import { hasFundraiserTag } from "./products.server";
@@ -27,8 +28,10 @@ export { UserError };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function isoDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
+export function isoDate(value: Date): string;
+export function isoDate(value: Date | null): string | null;
+export function isoDate(value: Date | null): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
 }
 
 function dateColumn(iso: string): Date {
@@ -68,6 +71,7 @@ export async function findOverlaps(
     orderBy: { windowStart: "asc" },
   });
   return others
+    .filter(hasLaunchFields) // no dates yet: can't overlap anything
     .filter((f) => {
       const w = effectiveWindow({ start: f.windowStart, end: f.windowEnd }, f.cancelledAt);
       return w.start < window.end && window.start < w.end && w.end > w.start;
@@ -111,10 +115,12 @@ async function withOverlapMessage<T>(
 
 export interface CreateFundraiserInput {
   teamId: number;
-  productId: number;
+  /** Optional in Setup (e.g. created from an application); launch requires it. */
+  productId?: number | null;
   seasonLabel?: string | null;
-  startDate: string;
-  endDate: string;
+  /** Optional in Setup, but both or neither; launch requires them. */
+  startDate?: string | null;
+  endDate?: string | null;
   timezone?: string;
   payoutRateCents?: number;
   paypalPayeeEmail?: string | null;
@@ -139,14 +145,7 @@ export async function createFundraiser(
 ): Promise<Fundraiser> {
   const team = await db.team.findUnique({ where: { id: input.teamId }, include: { organization: true } });
   if (!team) throw new UserError("Choose a team.");
-  const product = await db.product.findUnique({ where: { id: input.productId }, include: { team: true } });
-  if (!product) throw new UserError("Choose a linked product.");
-  if (product.deletedAt || product.status === "DELETED" || product.status === "ARCHIVED") {
-    throw new UserError(`"${product.title}" is ${product.deletedAt ? "deleted" : "archived"} in Shopify; a fundraiser can't use it.`);
-  }
-  if (product.teamId && product.teamId !== team.id) {
-    throw new UserError(`"${product.title}" belongs to ${product.team?.name ?? "another team"}. Choose that team's product.`);
-  }
+  const product = input.productId ? await usableProduct(db, input.productId, team.id) : null;
 
   const organizerIds = [...new Set(input.organizerIds)];
   if (organizerIds.length === 0) throw new UserError("Add at least one organizer.");
@@ -161,7 +160,10 @@ export async function createFundraiser(
   if (!Number.isInteger(rate) || rate <= 0) throw new UserError("The payout rate must be more than $0.");
 
   const timezone = input.timezone || DEFAULT_TIMEZONE;
-  const window = windowFor(input.startDate, input.endDate, timezone);
+  const startDate = input.startDate || null;
+  const endDate = input.endDate || null;
+  if (!startDate !== !endDate) throw new UserError("Set both the start and end dates, or leave both empty for now.");
+  const window = startDate && endDate ? windowFor(startDate, endDate, timezone) : null;
 
   let publicCode = input.publicCode ? normalizePublicCode(input.publicCode) : "";
   if (publicCode) {
@@ -169,22 +171,22 @@ export async function createFundraiser(
       throw new UserError(`The public code ${publicCode} is already used.`);
     }
   } else {
-    publicCode = await uniqueSuggestedCode(db, suggestPublicCode(team.organization.name, team.name, input.startDate));
+    publicCode = await uniqueSuggestedCode(db, suggestPublicCode(team.organization.name, team.name, startDate ?? isoDate(new Date())));
   }
 
-  const fundraiser = await withOverlapMessage(db, product.id, window, undefined, () =>
+  const create = () =>
     db.$transaction(async (tx) => {
       const created = await tx.fundraiser.create({
         data: {
           publicCode,
           teamId: team.id,
-          productId: product.id,
+          productId: product?.id ?? null,
           seasonLabel: input.seasonLabel?.trim() || null,
-          startDate: dateColumn(input.startDate),
-          endDate: dateColumn(input.endDate),
+          startDate: startDate ? dateColumn(startDate) : null,
+          endDate: endDate ? dateColumn(endDate) : null,
           timezone,
-          windowStart: window.start,
-          windowEnd: window.end,
+          windowStart: window?.start ?? null,
+          windowEnd: window?.end ?? null,
           payoutRateCents: rate,
           status: "setup",
           paypalPayeeEmail: payee,
@@ -194,7 +196,7 @@ export async function createFundraiser(
           },
         },
       });
-      if (!product.teamId) {
+      if (product && !product.teamId) {
         await tx.product.update({ where: { id: product.id }, data: { teamId: team.id } });
       }
       await writeAudit(tx, {
@@ -204,9 +206,9 @@ export async function createFundraiser(
         after: {
           publicCode,
           team: `${team.organization.name} – ${team.name}`,
-          product: product.title,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          product: product?.title ?? null,
+          startDate,
+          endDate,
           timezone,
           payoutRateCents: rate,
           organizerIds,
@@ -215,12 +217,58 @@ export async function createFundraiser(
         actor,
       });
       return created;
-    }),
-  );
+    });
+  const fundraiser = product && window ? await withOverlapMessage(db, product.id, window, undefined, create) : await create();
 
   // A new window can claim sales already saved for this product.
-  await reattributeProduct(db, product.shopifyProductId);
+  if (product && window) await reattributeProduct(db, product.shopifyProductId);
   return fundraiser;
+}
+
+/** A product a fundraiser for this team may use (live in Shopify, not another team's). */
+async function usableProduct(db: PrismaClient, productId: number, teamId: number) {
+  const product = await db.product.findUnique({ where: { id: productId }, include: { team: true } });
+  if (!product) throw new UserError("Choose a linked product.");
+  if (product.deletedAt || product.status === "DELETED" || product.status === "ARCHIVED") {
+    throw new UserError(`"${product.title}" is ${product.deletedAt ? "deleted" : "archived"} in Shopify; a fundraiser can't use it.`);
+  }
+  if (product.teamId && product.teamId !== teamId) {
+    throw new UserError(`"${product.title}" belongs to ${product.team?.name ?? "another team"}. Choose that team's product.`);
+  }
+  return product;
+}
+
+/**
+ * Link (or change) the product while the fundraiser is in Setup. Both the old
+ * and new product are re-attributed, so a window already set moves with it.
+ */
+export async function setFundraiserProduct(db: PrismaClient, id: number, productId: number, actor: string) {
+  const f = await db.fundraiser.findUniqueOrThrow({ where: { id }, include: { product: true } });
+  if (f.status !== "setup" && f.status !== "application") {
+    throw new UserError("The product can only be chosen while the fundraiser is in Setup.");
+  }
+  if (f.productId === productId) return;
+  const product = await usableProduct(db, productId, f.teamId);
+  const update = () =>
+    db.$transaction(async (tx) => {
+      await tx.fundraiser.update({ where: { id }, data: { productId: product.id } });
+      if (!product.teamId) await tx.product.update({ where: { id: product.id }, data: { teamId: f.teamId } });
+      await writeAudit(tx, {
+        entity: "fundraiser",
+        entityId: id,
+        action: "set_product",
+        before: { product: f.product?.title ?? null },
+        after: { product: product.title },
+        actor,
+      });
+    });
+  if (f.windowStart && f.windowEnd) {
+    await withOverlapMessage(db, product.id, { start: f.windowStart, end: f.windowEnd }, id, update);
+  } else {
+    await update();
+  }
+  if (f.product) await reattributeProduct(db, f.product.shopifyProductId);
+  await reattributeProduct(db, product.shopifyProductId);
 }
 
 // ------------------------------------------------------------ edit details
@@ -311,7 +359,8 @@ export interface DatesRateChange {
 }
 
 export interface DatesRatePreview {
-  before: { startDate: string; endDate: string; payoutRateCents: number; qualifyingUnits: number; estimatedPayoutCents: number };
+  /** startDate/endDate are null when the fundraiser had no dates yet. */
+  before: { startDate: string | null; endDate: string | null; payoutRateCents: number; qualifyingUnits: number; estimatedPayoutCents: number };
   after: { startDate: string; endDate: string; payoutRateCents: number; qualifyingUnits: number; estimatedPayoutCents: number };
   overlaps: OverlapInfo[];
 }
@@ -332,13 +381,19 @@ async function assertDatesRateEditable(db: PrismaClient, f: Fundraiser) {
  */
 async function computeTotalsWith(
   db: PrismaClient,
-  f: Fundraiser & { product: { shopifyProductId: string } },
+  fundraiserId: number,
+  product: { shopifyProductId: string },
   window: TimeWindow,
   payoutRateCents: number,
 ): Promise<FundraiserTotals> {
-  const shopifyProductId = f.product.shopifyProductId;
-  const fundraisers = (await loadFundraisersForProducts(db, [shopifyProductId])).map((x) =>
-    x.id === f.id ? { ...x, windowStart: window.start, windowEnd: window.end } : x,
+  const shopifyProductId = product.shopifyProductId;
+  const loaded = await loadFundraisersForProducts(db, [shopifyProductId]);
+  // A fundraiser getting its first dates isn't in the loaded list yet.
+  const withThis = loaded.some((x) => x.id === fundraiserId)
+    ? loaded
+    : [...loaded, { id: fundraiserId, shopifyProductId, status: "setup", windowStart: window.start, windowEnd: window.end, cancelledAt: null }];
+  const fundraisers = withThis.map((x) =>
+    x.id === fundraiserId ? { ...x, windowStart: window.start, windowEnd: window.end } : x,
   );
   const orders = await db.shopifyOrder.findMany({
     where: { lineItems: { some: { shopifyProductId } } },
@@ -354,7 +409,7 @@ async function computeTotalsWith(
       adminDecision: byId.get(r.key)?.adminDecision ?? null,
     }));
   });
-  return fundraiserTotals(f.id, payoutRateCents, lines);
+  return fundraiserTotals(fundraiserId, payoutRateCents, lines);
 }
 
 export async function previewDatesRateChange(
@@ -368,10 +423,14 @@ export async function previewDatesRateChange(
     throw new UserError("The payout rate must be more than $0.");
   }
   const newWindow = windowFor(change.startDate, change.endDate, f.timezone);
+  // Without a product there are no sales to count yet, and nothing to overlap.
+  const product = f.product;
+  const oldWindow = f.windowStart && f.windowEnd ? { start: f.windowStart, end: f.windowEnd } : null;
+  const none = fundraiserTotals(f.id, 0, []);
   const [before, after, overlaps] = await Promise.all([
-    computeTotalsWith(db, f, { start: f.windowStart, end: f.windowEnd }, f.payoutRateCents),
-    computeTotalsWith(db, f, newWindow, change.payoutRateCents),
-    findOverlaps(db, f.productId, effectiveWindow(newWindow, f.cancelledAt), f.id),
+    product && oldWindow ? computeTotalsWith(db, f.id, product, oldWindow, f.payoutRateCents) : none,
+    product ? computeTotalsWith(db, f.id, product, newWindow, change.payoutRateCents) : fundraiserTotals(f.id, change.payoutRateCents, []),
+    product ? findOverlaps(db, product.id, effectiveWindow(newWindow, f.cancelledAt), f.id) : [],
   ]);
   return {
     before: {
@@ -397,13 +456,15 @@ export async function applyDatesRateChange(
   reason: string,
   actor: string,
 ): Promise<{ preview: DatesRatePreview; saved: FundraiserTotals }> {
-  if (!reason.trim()) throw new UserError("A reason is required to change dates or rate.");
   const preview = await previewDatesRateChange(db, id, change);
+  // Setting dates for the first time needs no reason; changing them does.
+  const firstDates = preview.before.startDate === null;
+  if (!firstDates && !reason.trim()) throw new UserError("A reason is required to change dates or rate.");
   if (preview.overlaps.length) throw new UserError(overlapMessage(preview.overlaps));
 
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id }, include: { product: true } });
   const window = windowFor(change.startDate, change.endDate, f.timezone);
-  await withOverlapMessage(db, f.productId, window, f.id, () =>
+  const save = () =>
     db.$transaction(async (tx) => {
       await tx.fundraiser.update({
         where: { id },
@@ -420,16 +481,19 @@ export async function applyDatesRateChange(
       await writeAudit(tx, {
         entity: "fundraiser",
         entityId: id,
-        action: "change_dates_rate",
+        action: firstDates ? "set_dates_rate" : "change_dates_rate",
         before: preview.before,
         after: preview.after,
-        reason: reason.trim(),
+        reason: reason.trim() || null,
         actor,
       });
-    }),
-  );
-
-  await reattributeProduct(db, f.product.shopifyProductId);
+    });
+  if (f.product) {
+    await withOverlapMessage(db, f.product.id, window, f.id, save);
+    await reattributeProduct(db, f.product.shopifyProductId);
+  } else {
+    await save();
+  }
   const saved = await storedTotals(db, { id, payoutRateCents: change.payoutRateCents });
   return { preview, saved };
 }
@@ -440,11 +504,15 @@ export async function launchBlockersFor(db: PrismaClient, id: number): Promise<s
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id }, include: { product: true } });
   return launchBlockers({
     checklist: checklistFrom(f),
-    productStatus: f.product.status,
-    productDeleted: !!f.product.deletedAt,
+    hasProduct: !!f.product,
+    productStatus: f.product?.status ?? "NONE",
+    productDeleted: !!f.product?.deletedAt,
     hasDates: !!f.startDate && !!f.endDate,
     payoutRateCents: f.payoutRateCents,
-    overlapping: await findOverlaps(db, f.productId, { start: f.windowStart, end: f.windowEnd }, f.id),
+    overlapping:
+      f.product && f.windowStart && f.windowEnd
+        ? await findOverlaps(db, f.product.id, { start: f.windowStart, end: f.windowEnd }, f.id)
+        : [],
     storefrontEnabled: f.storefrontEnabled,
     shortLinkWritten: !!f.shortLinkRedirectId,
     bannerWritten: f.bannerState === "on",
@@ -466,8 +534,13 @@ export async function transitionFundraiser(
 ): Promise<Fundraiser> {
   const now = options.now ?? new Date();
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id }, include: { product: true } });
-  const check = canTransition(f.status, action, { now, windowStart: f.windowStart, reason: options.reason });
+  const check = canTransition(f.status, action, { now, windowStart: f.windowStart ?? now, reason: options.reason });
   if (!check.ok) throw new UserError(check.error);
+  // Never launched (no product or dates): there is nothing to cancel or
+  // settle, so it is declined instead.
+  if (action === "cancel" && !hasLaunchFields(f)) {
+    throw new UserError("This fundraiser has no product or dates yet, so there is nothing to cancel. Use Decline instead.");
+  }
 
   if (action === "approve_launch") {
     const blockers = await launchBlockersFor(db, id);
@@ -497,7 +570,7 @@ export async function transitionFundraiser(
   });
 
   // Cancelling shortens the window, so sales after this moment stop counting.
-  if (action === "cancel") await reattributeProduct(db, f.product.shopifyProductId);
+  if (action === "cancel" && f.product) await reattributeProduct(db, f.product.shopifyProductId);
   return updated;
 }
 
@@ -549,6 +622,7 @@ export async function setChecklistItem(
   const f = await db.fundraiser.findUniqueOrThrow({ where: { id }, include: { product: true } });
   if (["paid", "declined"].includes(f.status)) throw new UserError("This fundraiser can't be edited.");
   if (done && key === "productReady") {
+    if (!f.product) throw new UserError("Choose the product first.");
     if (f.product.status !== "ACTIVE" || f.product.deletedAt) {
       throw new UserError(`"${f.product.title}" isn't active in Shopify yet.`);
     }

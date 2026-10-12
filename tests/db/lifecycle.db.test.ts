@@ -71,8 +71,8 @@ describe("creating fundraisers", () => {
     const s = await seed();
     const f = await newFundraiser(s);
     expect(f).toMatchObject({ status: "setup", payoutRateCents: 2500, timezone: "America/Los_Angeles", publicCode: "CHS-GLAX-F26" });
-    expect(f.windowStart.toISOString()).toBe("2026-10-01T07:00:00.000Z");
-    expect(f.windowEnd.toISOString()).toBe("2026-11-01T07:00:00.000Z");
+    expect(f.windowStart?.toISOString()).toBe("2026-10-01T07:00:00.000Z");
+    expect(f.windowEnd?.toISOString()).toBe("2026-11-01T07:00:00.000Z");
     const links = await db.fundraiserOrganizer.findMany({ where: { fundraiserId: f.id } });
     expect(links).toEqual([expect.objectContaining({ organizerId: s.organizer.id, isPrimary: true })]);
     expect(await db.auditLog.count({ where: { entity: "fundraiser", action: "create" } })).toBe(1);
@@ -167,7 +167,7 @@ describe("Attribution and payout test cases (spec), through the lifecycle servic
     expect(saved.estimatedPayoutCents).toBe(preview.after.estimatedPayoutCents);
 
     const updated = await db.fundraiser.findUniqueOrThrow({ where: { id: f.id } });
-    expect(updated.windowStart.toISOString()).toBe("2026-10-05T07:00:00.000Z");
+    expect(updated.windowStart?.toISOString()).toBe("2026-10-05T07:00:00.000Z");
     const audit = await db.auditLog.findFirstOrThrow({ where: { entity: "fundraiser", action: "change_dates_rate" } });
     expect(audit).toMatchObject({ reason: "Organizer moved the kickoff", actor: "Matt" });
     expect(audit.before).toMatchObject({ startDate: "2026-10-01", qualifyingUnits: 7 });

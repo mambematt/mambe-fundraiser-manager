@@ -1,14 +1,15 @@
 // Everything the fundraiser page's Payout section shows.
 import type { PrismaClient } from "@prisma/client";
+import { launched } from "../lib/launched";
 import { adminOrderUrl } from "../lib/shopify-links";
 import { crosscheckData } from "./crosscheck.server";
 import { payoutSummary, settlementDueAt } from "./settlement.server";
 
 export async function loadPayoutView(db: PrismaClient, fundraiserId: number, storeTimezone: string | null) {
-  const f = await db.fundraiser.findUniqueOrThrow({
+  const f = launched(await db.fundraiser.findUniqueOrThrow({
     where: { id: fundraiserId },
     include: { payout: { include: { adjustments: { orderBy: { createdAt: "asc" } }, changes: { orderBy: { detectedAt: "desc" } } } } },
-  });
+  }));
   const base = {
     fundraiserStatus: f.status,
     dueAt: settlementDueAt(f).toISOString(),
