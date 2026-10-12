@@ -11,7 +11,7 @@ import { dollars, pacific } from "../lib/format";
 import { attempt, formText, type ActionResult } from "../services/actions.server";
 import { BACKUP_JOB, runPayoutBackup } from "../services/backups.server";
 import { createDriveClient, driveOrThrow } from "../services/drive.server";
-import { buildReports, reportCsv, type Cell, type ReportTable } from "../services/reports.server";
+import { buildReports, ordersByFundraiser, reportCsv, type Cell, type ReportTable } from "../services/reports.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -42,6 +42,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = formText(form, "intent");
   return attempt(async (): Promise<ActionResult & { csv?: string }> => {
+    if (intent === "csv" && formText(form, "table") === "orders-by-fundraiser") {
+      const shop = (await db.session.findFirst({ where: { isOnline: false } }))?.shop ?? null;
+      return { ok: true, message: "", csv: reportCsv(await ordersByFundraiser(db, shop)) };
+    }
     if (intent === "csv") {
       const table = (await buildReports(db)).find((t) => t.key === formText(form, "table"));
       if (!table) return { ok: false, message: "Unknown report." };
@@ -98,7 +102,17 @@ function Table({ table }: { table: ReportTable }) {
             </s-table-body>
           </s-table>
         )}
-        <CsvDownload intent="csv" fields={{ table: table.key }} filename={`mambe-${table.key}-${new Date().toISOString().slice(0, 10)}.csv`} label="Download CSV" />
+        <s-stack direction="inline" gap="base">
+          <CsvDownload intent="csv" fields={{ table: table.key }} filename={`mambe-${table.key}-${new Date().toISOString().slice(0, 10)}.csv`} label="Download CSV" />
+          {table.key === "raised-by-fundraiser" && (
+            <CsvDownload
+              intent="csv"
+              fields={{ table: "orders-by-fundraiser" }}
+              filename={`mambe-orders-by-fundraiser-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Download the orders behind it (CSV)"
+            />
+          )}
+        </s-stack>
       </s-stack>
     </s-section>
   );

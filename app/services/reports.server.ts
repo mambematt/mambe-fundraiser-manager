@@ -3,7 +3,9 @@
 // from frozen payouts; nothing here re-counts units its own way.
 
 import type { PrismaClient } from "@prisma/client";
-import { netUnits } from "../lib/attribution";
+import { DateTime } from "luxon";
+import { netUnits, REVIEW_FLAG_LABELS, type ReviewFlag } from "../lib/attribution";
+import { numericId } from "../lib/shopify-ids";
 import { toCsv } from "../lib/payout-files";
 import { STATUS_LABELS, STATUSES, type FundraiserStatus } from "../lib/status";
 import { isoDate, storedTotals } from "./fundraisers.server";
@@ -88,6 +90,73 @@ function groupSum<T>(items: FundraiserNumbers[], key: (f: FundraiserNumbers) => 
     map.set(key(f), g);
   }
   return [...map.values()];
+}
+
+const OUTCOMES: Record<string, string> = {
+  qualifying: "Qualifying",
+  non_fundraiser: "Outside window",
+  refunded_cancelled: "Refunded/cancelled",
+  excluded: "Excluded by admin",
+  not_eligible: "Not paid yet",
+  test_order: "Test order (not counted)",
+};
+const DAY = 24 * 3600 * 1000;
+
+/** Opens the order in Shopify admin (works from a spreadsheet, unlike shopify:// links). */
+export function adminOrderWebUrl(shop: string | null, shopifyOrderId: string): string {
+  return shop ? `https://admin.shopify.com/store/${shop.replace(/\.myshopify\.com$/, "")}/orders/${numericId(shopifyOrderId)}` : "";
+}
+
+/**
+ * For research: every order line behind each fundraiser's numbers (the lines
+ * attributed to it, plus sales of its product within 30 days outside its
+ * window). Order numbers only; customers are looked up in Shopify (the app
+ * stores no customer names, emails or addresses).
+ */
+export async function ordersByFundraiser(db: PrismaClient, shop: string | null): Promise<ReportTable> {
+  const fundraisers = await db.fundraiser.findMany({
+    where: { status: { not: "declined" } },
+    include: { product: { select: { shopifyProductId: true } } },
+    orderBy: [{ windowStart: { sort: "asc", nulls: "last" } }, { id: "asc" }],
+  });
+  const rows: Cell[][] = [];
+  for (const f of fundraisers) {
+    const near =
+      f.product && f.windowStart && f.windowEnd
+        ? [{ shopifyProductId: f.product.shopifyProductId, outcome: "non_fundraiser", order: { processedAt: { gte: new Date(f.windowStart.getTime() - 30 * DAY), lte: new Date(f.windowEnd.getTime() + 30 * DAY) } } }]
+        : [];
+    const lines = await db.orderLineItem.findMany({
+      where: { OR: [{ attributedFundraiserId: f.id }, ...near] },
+      include: { order: true },
+      orderBy: [{ order: { processedAt: "asc" } }, { id: "asc" }],
+    });
+    for (const l of lines) {
+      rows.push([
+        f.publicCode,
+        l.order.name,
+        DateTime.fromJSDate(l.order.processedAt).setZone(f.timezone).toFormat("yyyy-LL-dd HH:mm"),
+        l.quantity,
+        l.refundedQuantity,
+        l.outcome === "qualifying" ? l.qualifyingUnits : 0,
+        OUTCOMES[l.outcome] ?? l.outcome,
+        l.unitPriceCents,
+        l.order.discountCodes.join(" "),
+        l.reviewFlags.map((x) => REVIEW_FLAG_LABELS[x as ReviewFlag] ?? x).join("; "),
+        l.adminDecision ? `${l.adminDecision}: ${l.adminDecisionNote ?? ""} (${l.adminDecisionBy ?? ""})` : "",
+        adminOrderWebUrl(shop, l.order.shopifyOrderId),
+      ]);
+    }
+  }
+  return {
+    key: "orders-by-fundraiser",
+    title: "Orders behind each fundraiser",
+    note: "One row per order line: those counted for the fundraiser, and sales of its product within 30 days outside its window. Times in the fundraiser's timezone. Look up the customer in Shopify by order number.",
+    columns: [
+      text("Fundraiser"), text("Order"), text("Checkout (fundraiser time)"), num("Quantity"), num("Refunded"), num("Units counted"),
+      text("Outcome"), money("Line price"), text("Discount codes"), text("Flags"), text("Your decision"), text("Shopify link"),
+    ],
+    rows,
+  };
 }
 
 export async function buildReports(db: PrismaClient, now = new Date()): Promise<ReportTable[]> {

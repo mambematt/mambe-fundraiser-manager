@@ -22,7 +22,7 @@ import { runClock } from "../../app/services/jobs.server";
 import type { KlaviyoClient, MetricName } from "../../app/services/klaviyo.server";
 import { saveOrder } from "../../app/services/order-sync.server";
 import { markProductDeleted } from "../../app/services/products.server";
-import { buildReports, reportCsv } from "../../app/services/reports.server";
+import { buildReports, ordersByFundraiser, reportCsv } from "../../app/services/reports.server";
 import { accountantCsv } from "../../app/lib/payout-files";
 import { resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
 import { fakeDrive } from "../helpers/fake-drive";
@@ -471,6 +471,25 @@ describe("reports", () => {
 
     // After CHS-GLAX-F26 ended (Sep 16 PT): Oct 1 (1, outside) + Mar 5 (2, in spring).
     expect(tables["after-first"]!.rows).toEqual([["Girls Lacrosse", "Central High School", "CHS-GLAX-F26", "2026-09-16", 3, expect.any(Number), 2, 1]]);
+  });
+
+  test("orders behind each fundraiser: counted lines plus nearby outside-window sales, no customer details", async () => {
+    await reportFixtures();
+    const table = await ordersByFundraiser(db, "mambe-blanket-co.myshopify.com");
+    const fall = table.rows.filter((r) => r[0] === "CHS-GLAX-F26");
+    // Aug 20 (outside, within 30 days before), Sep 5 (2), Sep 10 (1), Oct 1 (outside, within 30 days after).
+    expect(fall.map((r) => [r[2], r[5], r[6]])).toEqual([
+      ["2026-08-20 10:00", 0, "Outside window"],
+      ["2026-09-05 10:00", 2, "Qualifying"],
+      ["2026-09-10 10:00", 1, "Qualifying"],
+      ["2026-10-01 10:00", 0, "Outside window"],
+    ]);
+    expect(String(fall[1]![11])).toMatch(/^https:\/\/admin\.shopify\.com\/store\/mambe-blanket-co\/orders\/\d+$/);
+    const csv = reportCsv(table);
+    expect(csv.split(/\r?\n/)[0]).toBe(
+      "Fundraiser,Order,Checkout (fundraiser time),Quantity,Refunded,Units counted,Outcome,Line price,Discount codes,Flags,Your decision,Shopify link",
+    );
+    expect(csv).not.toMatch(/@|Laurito|Pat\b/);
   });
 
   test("CSV columns and money in dollars", async () => {
