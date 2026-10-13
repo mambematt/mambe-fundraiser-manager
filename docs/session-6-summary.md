@@ -182,7 +182,7 @@ Completed Oct 12, 2026. Prompt: `docs/session-6-build-prompt.md`. Spec: `docs/SP
 - **NS-GSB-F26:** unchanged (Active), with Drive folders created. It still settles **Nov 26, 12:00 AM Pacific**.
 
 ## Next / V1.5 recommendations
-- **Before Nov 26 (unchanged):** confirm PayPal Payouts access; take a Render export before approving; follow the session 5 checklist for NS-GSB-F26.
+- **Before Nov 26:** PayPal Payouts bulk upload is **confirmed available** (Oct 12). Take a Render export before approving; follow the session 5 checklist for NS-GSB-F26.
 - **After Nov 26 (unfrozen):**
   - Give organizer email and login-link Klaviyo IDs the service-name prefix, like application emails.
   - Point the Payouts page at the shared accountant-row code (`backups.server.ts`).
@@ -192,4 +192,4 @@ Completed Oct 12, 2026. Prompt: `docs/session-6-build-prompt.md`. Spec: `docs/SP
   - contribution-after-payout report (table 6 is a start)
   - organizer self-serve edits
   - a weekly "applications not answered in 2 business days" work-queue item, to keep the promise on the thank-you screen
-- **Owner decision pending (no rush):** Google Workspace vs Microsoft SharePoint for company documents. This app can move to either later.
+- **Owner decision (Oct 12):** Drive stays on matt@mambeblankets.com for now; Workspace or SharePoint may come later, and this app can move to either.
