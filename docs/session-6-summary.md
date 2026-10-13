@@ -186,7 +186,7 @@ Completed Oct 12, 2026. Prompt: `docs/session-6-build-prompt.md`. Spec: `docs/SP
 - **After Nov 26 (unfrozen):**
   - Give organizer email and login-link Klaviyo IDs the service-name prefix, like application emails.
   - Point the Payouts page at the shared accountant-row code (`backups.server.ts`).
-- **Still open:** the welcome coupon fix and the live welcome-code test (session 4, done item 4).
+- **Welcome coupon (session 4, done item 4):** the owner rebuilt the coupon (Oct 12) and chose to skip the live welcome-code test; closed by owner decision. Safety net: a code that still reaches a fundraiser product is caught by the discount flag before payout.
 - **V1.5 candidates:**
   - "Run it again?" reactivation emails (the repeat-rate report shows who to target)
   - contribution-after-payout report (table 6 is a start)
