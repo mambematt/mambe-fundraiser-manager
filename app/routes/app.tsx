@@ -4,7 +4,10 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { pageTitle } from "../lib/page-title";
+import { APP_TITLE, sectionTitle } from "../lib/page-title";
+
+// The font Shopify admin and the Polaris components use.
+const ADMIN_FONT = "var(--p-font-family-sans, Inter, -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif)";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -26,6 +29,7 @@ function TitleBar() {
           color: "#fff",
           textAlign: "center",
           textTransform: "uppercase",
+          fontFamily: ADMIN_FONT,
           fontWeight: 700,
           fontSize: "1.5rem",
           letterSpacing: "0.02em",
@@ -33,7 +37,7 @@ function TitleBar() {
           borderRadius: "0.25rem",
         }}
       >
-        {pageTitle(pathname)}
+        {APP_TITLE} - <span style={{ fontStyle: "italic" }}>{sectionTitle(pathname)}</span>
       </div>
     </div>
   );
