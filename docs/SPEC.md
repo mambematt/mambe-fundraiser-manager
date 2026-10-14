@@ -77,11 +77,20 @@ Every rule below is decided; the build and the tests follow them exactly.
 | Backups | Hobby plan keeps 3 days of point-in-time recovery; owner takes a manual logical backup in Render before each payout run (app reminds); restore drill passed Oct 11 |
 | PayPal file | Payouts web upload, no header row: email, amount, USD, public code, note, PAYPAL; needs Payouts access on the PayPal Business account, with normal Send as fallback |
 
+| Topic (session 6) | Decision |
+| --- | --- |
+| Application form | Live at mambeblankets.com/pages/fundraise (theme app block, App Proxy, honeypot + timing + rate limits); thank-you promises a reply within 2 business days |
+| Application stage | The application record is the Application stage; Accept creates the fundraiser in Setup with no product or dates (both required before launch); Application status kept only for legacy records |
+| Application emails | Application Received (applicant) and New Application (matt@mambeblankets.com) via Klaviyo; global switch APPLICATION\_EMAILS\_ENABLED is on in production |
+| Google Drive | No Google Workspace: the app signs in as matt@mambeblankets.com with drive.file scope only; folders under Fundraising/ in My Drive; weekly payout CSV backup to Fundraising/\_Backups every Monday |
+| Reports | Six fixed reports with CSV, plus an orders-behind-it CSV per fundraiser (no customer names) |
+| Welcome coupon | Rebuilt as a product-scoped discount on Oct 12; live two-product test skipped by owner decision; the discount flag is the safety net |
+
 ## Architecture and stack
 
 The app is one Render web service with Postgres and a few cron jobs; Shopify remains the source of truth for anything the customer touches.
 
-*(Architecture diagram: see the spec doc.)*
+&#91;embedded content: system architecture · Shopify, the app, and three services\]
 
 Orders flow in from Shopify by webhook and are re-checked nightly; the app writes back only a product-page banner and short-link redirects. Outlook stays for human conversations; n8n is not used.
 
@@ -185,7 +194,7 @@ The fundraiser a line belongs to is stored on the line for fast reporting, recal
 
 Eight statuses track where a fundraiser is in its life; a separate checklist tracks the setup work, because several setup items are often open at once.
 
-*(Status diagram: see the spec doc.)*
+&#91;embedded content: fundraiser statuses · 8 statuses, 3 automatic moves\]
 
 Only three moves are automatic (Active, Settling, Payout pending); everything else is a deliberate admin click. Statuses are stored as text with an allowed-transitions list in code, so a new status later needs no database redesign.
 
