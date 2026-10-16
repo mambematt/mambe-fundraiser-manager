@@ -15,6 +15,8 @@ import {
 } from "../../app/services/fundraisers.server";
 import { saveOrder } from "../../app/services/order-sync.server";
 import { portalView } from "../../app/services/portal.server";
+import { loadPayoutView } from "../../app/services/payout-view.server";
+import { hasLaunchFields, MissingLaunchFieldsError } from "../../app/lib/launched";
 import { resetDb, seedTeamAndProduct, testDb } from "../helpers/db";
 import { CAPE, pt, shopifyOrderNode } from "../helpers/fixtures";
 
@@ -82,6 +84,22 @@ describe("fundraiser without product or dates (Setup)", () => {
     expect(actions).toEqual(expect.arrayContaining(["create", "set_product", "set_dates_rate"]));
     // Changing dates that already exist still needs a reason.
     await expect(applyDatesRateChange(db, f.id, { startDate: "2026-10-02", endDate: "2026-10-31", payoutRateCents: 2500 }, "", "Matt")).rejects.toThrow(/reason is required/);
+  });
+
+  test("dates first, product later (production bug Oct 16): the page must not load the payout section yet", async () => {
+    const s = await seed();
+    const f = await bare(s);
+    await applyDatesRateChange(db, f.id, { startDate: "2026-10-19", endDate: "2026-11-30", payoutRateCents: 2500 }, "", "Matt");
+    const page = await db.fundraiser.findUniqueOrThrow({ where: { id: f.id }, include: { product: true } });
+    expect(page).toMatchObject({ productId: null, startDate: new Date("2026-10-19T00:00:00Z") });
+    // The fundraiser page shows the payout section only when this is true...
+    expect(hasLaunchFields(page)).toBe(false);
+    // ...because the (frozen) payout code refuses a fundraiser without a product.
+    await expect(loadPayoutView(db, f.id, null)).rejects.toThrow(MissingLaunchFieldsError);
+    // Linking the product afterwards makes it whole.
+    await setFundraiserProduct(db, f.id, s.product.id, "Matt");
+    expect(hasLaunchFields(await db.fundraiser.findUniqueOrThrow({ where: { id: f.id }, include: { product: true } }))).toBe(true);
+    expect((await loadPayoutView(db, f.id, null)).payout).toBeNull();
   });
 
   test("with product and dates set and the checklist done, it launches like any other", async () => {

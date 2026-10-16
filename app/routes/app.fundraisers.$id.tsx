@@ -56,6 +56,7 @@ import { issueLoginLink } from "../services/portal.server";
 import { shopifyClientForShop } from "../services/shopify-client.server";
 import { publishStorefront, setBannerTeamName, setShortLinkSlug, setStorefrontEnabled, slugFor } from "../services/storefront.server";
 import { staffName } from "../services/staff.server";
+import { hasLaunchFields } from "../lib/launched";
 import { createDriveClient, createDriveFolders, driveLinks, driveOrThrow } from "../services/drive.server";
 
 const TABS = [
@@ -161,7 +162,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const checklist = checklistFrom(f);
   const startDate = isoDate(f.startDate);
   const endDate = isoDate(f.endDate);
-  const dated = !!(startDate && endDate && f.windowStart && f.windowEnd);
+  // The payout section needs both product and dates; either can come first in Setup.
+  const launchReady = hasLaunchFields(f);
 
   return {
     f: {
@@ -257,8 +259,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         }
       })(),
     },
-    // Settlement needs a window, so no payout section until dates are set.
-    payoutView: dated
+    // Settlement needs the product and a window, so no payout section until both are set.
+    payoutView: launchReady
       ? await loadPayoutView(
           db,
           id,
