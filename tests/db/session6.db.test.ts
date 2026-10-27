@@ -58,7 +58,6 @@ function form(overrides: Record<string, string> = {}): Record<string, string> {
     state: "PA",
     timing_month: "March",
     timing_season: "Spring",
-    has_logo: "yes",
     notes: "We'd love a navy blanket.",
     website: "",
     started_at: String(NOW.getTime() - 60_000),
@@ -125,7 +124,7 @@ describe("application submit", () => {
       organizationName: "Nazareth Softball Boosters",
       teamName: "Girls Softball",
       roughTiming: "March · Spring season",
-      hasLogo: true,
+      hasLogo: null, // no longer asked
       notes: "We'd love a navy blanket.",
     });
     expect((app.rawSubmission as Record<string, unknown>).timing).toBe("March · Spring season");
@@ -134,11 +133,18 @@ describe("application submit", () => {
   });
 
   test("required fields are checked on the server too", async () => {
-    const r = await submit({ email: "not-an-email", phone: "12", timing_season: "", has_logo: "" });
+    const r = await submit({ email: "not-an-email", phone: "12", timing_season: "" });
     expect(r.status).toBe("invalid");
-    if (r.status === "invalid") expect(Object.keys(r.errors).sort()).toEqual(["email", "hasLogo", "phone", "timingSeason"]);
+    if (r.status === "invalid") expect(Object.keys(r.errors).sort()).toEqual(["email", "phone", "timingSeason"]);
     expect(await db.application.count()).toBe(0);
     expect(parseApplication(form()).ok).toBe(true);
+  });
+
+  test("logo question removed: not required, and a cached old form that still sends it is accepted (answer ignored)", async () => {
+    expect((await submit({ email: "new-form@example.com" })).status).toBe("saved");
+    expect((await submit({ email: "old-form@example.com", has_logo: "yes" })).status).toBe("saved");
+    const apps = await db.application.findMany({ orderBy: { id: "asc" } });
+    expect(apps.map((a) => a.hasLogo)).toEqual([null, null]);
   });
 
   test("honeypot and too-fast submissions are ignored quietly (nothing saved)", async () => {
@@ -168,6 +174,7 @@ describe("application submit", () => {
       ["Application Received", "trissy@example.com", false],
       ["New Application", "matt@mambeblankets.com", false],
     ]);
+    for (const e of k.events) expect(e.properties).not.toHaveProperty("has_logo");
     expect(k.events[1]!.properties.admin_link).toMatch(/^https:\/\/admin\.shopify\.com\/store\/mambe-blanket-co\/apps\/.*\/app\/applications\/1$/);
   });
 
@@ -260,6 +267,7 @@ describe("accept, decline, spam", () => {
     expect(fundraiser).toMatchObject({ status: "setup", teamId: team.id, productId: null, startDate: null, seasonLabel: "Spring 2027" });
     expect(fundraiser.notes).toContain("Timing: March · Spring season");
     expect(fundraiser.notes).toContain("navy blanket");
+    expect(fundraiser.notes).not.toContain("Logo:");
     expect(await db.organization.count()).toBe(2); // nothing new
     expect(await db.team.count()).toBe(2);
     const organizer = await db.organizer.findUniqueOrThrow({ where: { email: "trissy@example.com" } });
@@ -268,6 +276,14 @@ describe("accept, decline, spam", () => {
     const actions = (await db.auditLog.findMany()).map((a) => `${a.entity}:${a.action}`);
     expect(actions).toEqual(expect.arrayContaining(["application:accepted", "fundraiser:create", "fundraiser:from_application", "organizer:create"]));
     await expect(acceptApplication(db, app.id, { organizationId: org.id, teamId: team.id, useExistingOrganizer: false }, "Matt")).rejects.toThrow(/already converted/);
+  });
+
+  test("an application from before the logo question was removed keeps its answer in the notes", async () => {
+    await submit();
+    const app = await db.application.findFirstOrThrow();
+    await db.application.update({ where: { id: app.id }, data: { hasLogo: true } });
+    const { fundraiser } = await acceptApplication(db, app.id, { organizationId: null, organizationType: "booster", teamId: null, useExistingOrganizer: false }, "Matt");
+    expect(fundraiser.notes).toContain("Logo: yes.");
   });
 
   test("create-new path: new organization, team and organizer from the application", async () => {

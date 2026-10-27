@@ -157,7 +157,7 @@ export default function ApplicationPage() {
   const { a, emails, emailsOn, options, defaultChoice, organizer, typeGuess, driveReady, history } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state !== "idle";
-  const rows: Array<[string, string | null | undefined]> = [
+  const rows: Array<[string, string | null | undefined] | null> = [
     ["Name", a.name],
     ["Email", a.email],
     ["Phone", a.phone],
@@ -166,7 +166,8 @@ export default function ApplicationPage() {
     ["Role", a.role],
     ["City, state", a.place],
     ["Timing", a.timing],
-    ["Has a logo", a.hasLogo ? "Yes" : "No"],
+    // Only older applications were asked about a logo.
+    a.hasLogo === null ? null : ["Has a logo", a.hasLogo ? "Yes" : "No"],
     ["Notes", a.notes],
   ];
 
@@ -188,7 +189,7 @@ export default function ApplicationPage() {
               Fundraiser: <s-link href={`/app/fundraisers/${a.fundraiser.id}`}>{a.fundraiser.publicCode}</s-link>
             </s-paragraph>
           )}
-          {rows.map(([label, value]) => (
+          {rows.filter((r): r is [string, string | null | undefined] => r !== null).map(([label, value]) => (
             <s-paragraph key={label}>
               <s-text color="subdued">{label}:</s-text> {value || "—"}
             </s-paragraph>

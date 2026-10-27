@@ -76,13 +76,6 @@
       </label>
     </div>
 
-    <fieldset class="mambe-apply__field mambe-apply__logo">
-      <legend>Do you have a logo? *</legend>
-      <label><input type="radio" name="has_logo" value="yes" required> Yes</label>
-      <label><input type="radio" name="has_logo" value="no"> No</label>
-      <small class="mambe-apply__error" data-for="hasLogo"></small>
-    </fieldset>
-
     <label class="mambe-apply__field">
       <span>Anything else we should know? (optional)</span>
       <textarea name="notes" rows="3" maxlength="2000"></textarea>
@@ -110,7 +103,6 @@
   .mambe-apply__field input, .mambe-apply__field select, .mambe-apply__field textarea {
     font: inherit; font-size: 16px; padding: 0.65rem 0.75rem; border: 1px solid #b5b5b5; border-radius: 6px; width: 100%; box-sizing: border-box; background: #fff;
   }
-  .mambe-apply__logo label { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 1.5rem; font-size: 16px; }
   .mambe-apply__error { color: #b42318; min-height: 0; }
   .mambe-apply__field.is-invalid input, .mambe-apply__field.is-invalid select { border-color: #b42318; }
   .mambe-apply__hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
@@ -146,7 +138,6 @@
         var input = form.elements[name];
         if (!input.value.trim() || (name === "email" && !input.checkValidity())) { showError(labels[name], "This is required."); ok = false; }
       });
-      if (!form.querySelector('input[name="has_logo"]:checked')) { showError("hasLogo", "Please choose yes or no."); ok = false; }
       return ok;
     }
 

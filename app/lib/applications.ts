@@ -28,7 +28,6 @@ export interface ApplicationInput {
   state: string;
   timingMonth: string;
   timingSeason: string;
-  hasLogo: boolean;
   notes: string | null;
 }
 
@@ -37,7 +36,11 @@ export type FieldErrors = Partial<Record<keyof ApplicationInput, string>>;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const clean = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
 
-/** Checks every field the browser checks, again on the server. */
+/**
+ * Checks every field the browser checks, again on the server. The logo
+ * question was removed (Oct 27, owner: every team has one); a form still
+ * cached with it may send has_logo, which is ignored.
+ */
 export function parseApplication(raw: Record<string, unknown>): { ok: true; value: ApplicationInput } | { ok: false; errors: FieldErrors } {
   const value: ApplicationInput = {
     name: clean(raw.name),
@@ -50,7 +53,6 @@ export function parseApplication(raw: Record<string, unknown>): { ok: true; valu
     state: clean(raw.state, 40),
     timingMonth: clean(raw.timing_month, 40),
     timingSeason: clean(raw.timing_season, 40),
-    hasLogo: raw.has_logo === "yes",
     notes: typeof raw.notes === "string" && raw.notes.trim() ? raw.notes.trim().slice(0, 2000) : null,
   };
   const errors: FieldErrors = {};
@@ -64,7 +66,6 @@ export function parseApplication(raw: Record<string, unknown>): { ok: true; valu
   if (!value.state) errors.state = "Please enter your state.";
   if (![...MONTHS, NOT_SURE].includes(value.timingMonth as (typeof MONTHS)[number])) errors.timingMonth = "Please choose a month.";
   if (!SEASONS.includes(value.timingSeason as (typeof SEASONS)[number])) errors.timingSeason = "Please choose your team's season.";
-  if (raw.has_logo !== "yes" && raw.has_logo !== "no") errors.hasLogo = "Please tell us whether you have a logo.";
   return Object.keys(errors).length ? { ok: false, errors } : { ok: true, value };
 }
 

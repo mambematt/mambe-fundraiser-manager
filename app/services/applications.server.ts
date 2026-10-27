@@ -88,7 +88,6 @@ export async function submitApplication(
         city: a.city,
         state: a.state,
         roughTiming: roughTiming(a),
-        hasLogo: a.hasLogo,
         notes: a.notes,
         status: "new",
         createdAt: now,
@@ -130,7 +129,6 @@ function properties(app: Application, shop: string | null) {
     city: app.city,
     state: app.state,
     rough_timing: app.roughTiming,
-    has_logo: app.hasLogo ? "Yes" : "No",
     notes: app.notes ?? "",
     submitted_at: app.createdAt.toISOString(),
     admin_link: shop ? adminApplicationUrl(shop, app.id) : "",
@@ -340,7 +338,8 @@ export async function acceptApplication(
       primaryOrganizerId: organizerId,
       notes: [
         `From application #${id}. Timing: ${app.roughTiming ?? "not given"}.`,
-        `Logo: ${app.hasLogo ? "yes" : "no"}.`,
+        // Applications from before the logo question was removed keep their answer.
+        app.hasLogo === null ? null : `Logo: ${app.hasLogo ? "yes" : "no"}.`,
         app.notes ? `Applicant notes: ${app.notes}` : null,
       ].filter(Boolean).join(" "),
     },
